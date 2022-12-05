@@ -1,0 +1,4 @@
+.DS_Store
+/deps
+/_build
+mix.lock
