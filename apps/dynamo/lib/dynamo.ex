@@ -19,13 +19,16 @@ defmodule Dynamo do
     hash_tree_list: nil, # A {range:,hash_tree:} map. For each range, build a hash tree.
     message_list: nil, # Control the gossip protocol
     heartbeat_time: nil,
-    heartbeat_timer: nil
+    heartbeat_timer: nil,
+    check_time: nil,
+    check_timer: nil
   )
-  @spec new(non_neg_integer(),[atom()],non_neg_integer())::%Dynamo{}
+  @spec new(non_neg_integer(),[atom()],non_neg_integer(),non_neg_integer())::%Dynamo{}
   def new(
     index,
     pref_list,
-    heartbeat_time
+    heartbeat_time,
+    check_time
     ) do
       %Dynamo{
         index: index,
@@ -37,7 +40,9 @@ defmodule Dynamo do
         hash_tree_list: nil,
         message_list: nil,
         heartbeat_time: heartbeat_time,
-        heartbeat_timer: nil
+        heartbeat_timer: nil,
+        check_timer: nil,
+        check_time: check_time
       }
     end
 
@@ -77,6 +82,43 @@ defmodule Dynamo do
       else
         node.value
       end
+  end
+  @spec dynamo(%Dynamo{},any()) :: no_return()
+  def dynamo(state,extra_state) do
+    receive do
+      {sender,%Dynamo.PutRequest{
+        key: key,
+        value: value,
+        hash_code: hash_code,
+        vector_clock: vector_clock,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.PutResponse{
+        key: key,
+        hash_code: hash_code,
+        success: success,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.GetRequest{
+        key: key,
+        hash_tree: hash_tree,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.GetResponse{
+        key: key,
+        value: value,
+        vector_clock: vector_clock,
+        is_same: is_same,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      #Gossip Potocol
+
+
+    end
   end
 
 end
