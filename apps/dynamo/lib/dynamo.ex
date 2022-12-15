@@ -75,6 +75,22 @@ defmodule Dynamo do
     %{state | failure_node_list: MapSet.put(state.failure_node_list, failed_node)}
   end
 
+  # This function will init message_list with preference list
+  # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
+  @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
+  defp init_msg_list(state) do
+    state = %{ state | pref_list: MapSet.new(state.pref_list)}
+    state
+  end
+
+  # This function will clear message_list and make it empty
+  @spec clear_msg_list(%Dynamo{}) :: %Dynamo{}
+  defp clear_msg_list(state) do
+    state = %{state | msg_list: MapSet.new()}
+    state
+  end
+
+
   ############### END OF HELPER FUNCTION ###########################
 
 
@@ -108,14 +124,6 @@ defmodule Dynamo do
       send(Enum.at(state.pref_list, idx), :heartbeat_msg)
       send_heartbeat_msg(state, idx+1)
     }
-  end
-
-  # This function will init message_list with preference list
-  # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
-  @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
-  defp init_msg_list(state) do
-    state = %{ state | pref_list: MapSet.new(state.pref_list)}
-    state
   end
 
   # This function will take all necessary steps to make sure the node can send heartbeat properly
@@ -202,6 +210,15 @@ defmodule Dynamo do
     state
   end
 
+  # This function handle the checkout timeout message
+  @spec handle_checkout_timeout(%Dynamo{}) :: %Dynamo{}
+  defp handle_checkout_timeout(state) do
+    state = checkout_failure(state, 0)
+    state = reset_checkout_timer(state)
+    state = clear_msg_list(state)
+    state
+  end
+
   ############### END OF GOSSIP PROTOCOL ###########################
 
   @spec put(%Dynamo{},non_neg_integer(),{atom(),any()}):: %Dynamo{}
@@ -279,8 +296,7 @@ defmodule Dynamo do
         state = setup_node_with_heartbeat(state)
         dynamo(state)
       :set_checkout_timeout ->
-        state = checkout_failure(state, 0)
-        state = reset_checkout_timer(state)
+        state = handle_checkout_timeout(state)
         dynamo(state)
       {sender, :heartbeat_msg} ->
         dynamo(handle_heartbeat_msg(state, sender))
@@ -288,9 +304,6 @@ defmodule Dynamo do
         dynamo(handle_heartbeat_msg(state, from_node))
       {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
         dynamo(handle_node_failure_msg(state, failure_node))
-
-
-
     end
   end
 
