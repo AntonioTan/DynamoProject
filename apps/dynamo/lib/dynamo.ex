@@ -75,8 +75,8 @@ defmodule Dynamo do
     %{state | failure_node_list: MapSet.put(state.failure_node_list, failed_node)}
   end
 
-
   ############### END OF HELPER FUNCTION ###########################
+
 
   ############### GOSSIP PROTOCOL ###########################
   # Save a handle to the hearbeat timer.
@@ -275,47 +275,21 @@ defmodule Dynamo do
       }}->
         raise "Not Implemented"
       #Gossip Potocol
-
-
-    end
-  end
-
-  @spec node(%Dynamo{}) :: no_return()
-  def node(state) do
-    receive do
       :set_heartbeat_timeout ->
         state = setup_node_with_heartbeat(state)
-        node(state)
+        dynamo(state)
       :set_checkout_timeout ->
         state = checkout_failure(state, 0)
         state = reset_checkout_timer(state)
-        node(state)
+        dynamo(state)
       {sender, :heartbeat_msg} ->
-        node(handle_heartbeat_msg(state, sender))
+        dynamo(handle_heartbeat_msg(state, sender))
       {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
-        node(handle_heartbeat_msg(state, from_node))
+        dynamo(handle_heartbeat_msg(state, from_node))
       {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
-        node(handle_node_failure_msg(state, failure_node))
+        dynamo(handle_node_failure_msg(state, failure_node))
 
-    end
-  end
 
-  @spec node(%Dynamo{}) :: no_return()
-  def node(state) do
-    receive do
-      :set_heartbeat_timeout ->
-        state = setup_node_with_heartbeat(state)
-        node(state)
-      :set_checkout_timeout ->
-        state = checkout_failure(state, 0)
-        state = reset_checkout_timer(state)
-        node(state)
-      {sender, :heartbeat_msg} ->
-        node(handle_heartbeat_msg(state, sender))
-      {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
-        node(handle_heartbeat_msg(state, from_node))
-      {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
-        node(handle_node_failure_msg(state, failure_node))
 
     end
   end
