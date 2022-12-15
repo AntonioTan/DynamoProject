@@ -25,7 +25,7 @@ defmodule Dynamo do
     checkout_time: nil,
     checkout_timer: nil
   )
-  @spec new(non_neg_integer(),[atom()],non_neg_integer())::%Dynamo{}
+  @spec new(non_neg_integer(),[atom()],non_neg_integer(),non_neg_integer())::%Dynamo{}
   def new(
     index,
     pref_list,
@@ -241,6 +241,63 @@ defmodule Dynamo do
       else
         node.value
       end
+  end
+  @spec dynamo(%Dynamo{},any()) :: no_return()
+  def dynamo(state,extra_state) do
+    receive do
+      {sender,%Dynamo.PutRequest{
+        key: key,
+        value: value,
+        hash_code: hash_code,
+        vector_clock: vector_clock,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.PutResponse{
+        key: key,
+        hash_code: hash_code,
+        success: success,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.GetRequest{
+        key: key,
+        hash_tree: hash_tree,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      {sender,%Dynamo.GetResponse{
+        key: key,
+        value: value,
+        vector_clock: vector_clock,
+        is_same: is_same,
+        is_replica: is_replica
+      }}->
+        raise "Not Implemented"
+      #Gossip Potocol
+
+
+    end
+  end
+
+  @spec node(%Dynamo{}) :: no_return()
+  def node(state) do
+    receive do
+      :set_heartbeat_timeout ->
+        state = setup_node_with_heartbeat(state)
+        node(state)
+      :set_checkout_timeout ->
+        state = checkout_failure(state, 0)
+        state = reset_checkout_timer(state)
+        node(state)
+      {sender, :heartbeat_msg} ->
+        node(handle_heartbeat_msg(state, sender))
+      {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
+        node(handle_heartbeat_msg(state, from_node))
+      {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
+        node(handle_node_failure_msg(state, failure_node))
+
+    end
   end
 
   @spec node(%Dynamo{}) :: no_return()
