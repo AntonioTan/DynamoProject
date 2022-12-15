@@ -17,15 +17,20 @@ defmodule Dynamo do
     hash_map: nil, # Store the k-value list
     range_list: nil,
     hash_tree_list: nil, # A {range:,hash_tree:} map. For each range, build a hash tree.
-    message_list: nil, # Control the gossip protocol
+    # Control the gossip protocol
+    message_list: nil,
+    failure_node_list: nil,
     heartbeat_time: nil,
     heartbeat_timer: nil
+    checkout_time: nil,
+    checkout_timer: nil
   )
   @spec new(non_neg_integer(),[atom()],non_neg_integer())::%Dynamo{}
   def new(
     index,
     pref_list,
-    heartbeat_time
+    heartbeat_time,
+    checkout_time,
     ) do
       %Dynamo{
         index: index,
@@ -35,11 +40,169 @@ defmodule Dynamo do
         hash_map: nil,
         range_list: nil,
         hash_tree_list: nil,
-        message_list: nil,
+        message_list: MapSet.new(),
+        failure_node_list: MapSet.new(),
         heartbeat_time: heartbeat_time,
-        heartbeat_timer: nil
+        heartbeat_timer: nil,
+        checkout_time: checkout_time,
+        checkout_timer: nil
       }
     end
+
+  ############### HELPER FUNCTION ###########################
+
+  # This function broadcasts the given message to every node in the preference list
+  @spec broadcast_to_pref_list(%Dynamo{}, any()) :: [(boolean)]
+  defp broadcast_to_pref_list(state, msg) do
+    state.pref_list
+      |> Enum.map(fn neighbor_node ->
+        send(neighbor_node, msg)
+      end)
+  end
+
+
+  # This function will filter out failed node from pref_list
+  @spec check_pref_list_with_failed_node(%Dynamo{}, any()) :: %Dynamo{}
+  defp check_pref_list_with_failed_node(state, failed_node) do
+    %{state | pref_list: state.pref_list |> Enum.filter(
+      fn neighbor_node -> neighbor_node!=failed_node end
+      )}
+  end
+
+  # This function will add failed node to failed node list
+  @spec add_failed_node(%Dynamo{}, any()) :: %Dynamo{}
+  defp add_failed_node(state, failed_node) do
+    %{state | failure_node_list: MapSet.put(state.failure_node_list, failed_node)}
+  end
+
+
+  ############### END OF HELPER FUNCTION ###########################
+
+  ############### GOSSIP PROTOCOL ###########################
+  # Save a handle to the hearbeat timer.
+  @spec save_heartbeat_timer(%Dynamo{}, reference()) :: %Dynamo{}
+  defp save_heartbeat_timer(state, timer) do
+    %{state | heartbeat_timer: timer}
+  end
+
+  # This function should cancel the current
+  # hearbeat timer, and set  a new one. You can
+  # get heartbeat timeout from `state.heartbeat_timeout`.
+  # You might need to call this from your code.
+  @spec reset_heartbeat_timer(%Dynamo{}) :: %Dynamo{}
+  defp reset_heartbeat_timer(state) do
+    if state.heartbeat_timer != nil do
+      cancel_timer(state.heartbeat_timer)
+    end
+    heartbeat_timer = timer(state.heartbeat_time, :set_heartbeat_timeout)
+    state = save_heartbeat_timer(state, heartbeat_timer)
+    state
+  end
+
+  # This function will send heartbeat message to every node in the preference list
+  @spec send_heartbeat_msg(%Dynamo{}) :: %Dynamo{}
+  defp send_heartbeat_msg(state, idx) do
+    if(idx==length(state.pref_list)) {
+      state
+    } else {
+      send(Enum.at(state.pref_list, idx), :heartbeat_msg)
+      send_heartbeat_msg(state, idx+1)
+    }
+  end
+
+  # This function will init message_list with preference list
+  # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
+  @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
+  defp init_msg_list(state) do
+    state = %{ state | pref_list: MapSet.new(state.pref_list)}
+    state
+  end
+
+  # This function will take all necessary steps to make sure the node can send heartbeat properly
+  @spec setup_node_with_heartbeat(%Dynamo{}) :: %Dynamo{}
+  defp setup_node_with_heartbeat(state) do
+    state = reset_heartbeat_timer(state)
+    state = send_heartbeat_msg(state, 0)
+    state
+  end
+
+  # This function will handle heartbeat message received from other nodes
+  @spec handle_heartbeat_msg(%Dynamo{}, any()) :: %Dynamo{}
+  defp handle_heartbeat_msg(state, sender) do
+    already_received = MapSet.member?(state.message_list, sender)
+    state = if already_received do
+      state
+    else
+      broadcast_to_pref_list(state, %Dynamo.RedirectedHeartbeatMessage{from: sender})
+      %{state | message_list: MapSet.put(state.message_list, sender)}
+    end
+    state
+  end
+
+  # This function will check whether the node has received heartbeat message
+  # sent initially from every node in the preference list
+  # if not then it will gossip about the node failure message to neighbor nodes
+  @spec checkout_failure(%Dynamo{}, non_neg_integer()) :: %Dynamo{}
+  defp checkout_failure(state, idx) do
+    if(idx==length(state.pref_list)) {
+      state
+    } else {
+      neighbor_node = Enum.at(state.pref_list, idx)
+      whether_received_heartbeat = MapSet.member?(state.message_list, neighbor_node)
+      state = if whether_received_heartbeat do
+        state
+      else
+        broadcast_to_pref_list(state, %Dynamo.NodeFailureMessage{
+          failure_node: neighbor_node
+        })
+        state
+      end
+      checkout_failure(state, idx+1)
+    }
+  end
+
+  # Save a handle to the checkout timer.
+  @spec save_checkout_timer(%Dynamo{}, reference()) :: %Dynamo{}
+  defp save_checkout_timer(state, timer) do
+    %{state | checkout_timer: timer}
+  end
+
+  # This function will cancel the checkout timer and set up a new one
+  @spec reset_checkout_timer(%Dynamo{}) :: %Dynamo{}
+  defp reset_checkout_timer(state) do
+    if state.checkout_timer != nil do
+      cancel_timer(state.checkout_timer)
+    end
+    checkout_timer = timer(state.checkout_time, :set_checkout_timeout)
+    state = save_checkout_timer(state, checkout_timer)
+    state
+  end
+
+  # This function will set up the node to make sure the node checkout failure nodes correctly
+  @spec setup_node_with_checkout(%Dynamo{}) :: %Dynamo{}
+  defp setup_node_with_checkout(state) do
+    state = init_msg_list(state)
+    state = reset_checkout_timer(state)
+    state
+  end
+
+
+  # This function handle the node failure message and gossip to other nodes
+  @spec handle_node_failure_msg(%Dynamo{}, any()) :: %Dynamo{}
+  defp handle_node_failure_msg(state, failed_node) do
+    already_received = MapSet.member?(state.failure_node_list, failed_node)
+    state = if already_received do
+      state
+    else
+      state = check_pref_list_with_failed_node(state, failed_node)
+      state = add_failed_node(state, failed_node)
+      broadcast_to_pref_list(state, %Dynamo.NodeFailureMessage.new(failed_node))
+      state
+    end
+    state
+  end
+
+  ############### END OF GOSSIP PROTOCOL ###########################
 
   @spec put(%Dynamo{},non_neg_integer(),{atom(),any()}):: %Dynamo{}
   def put(
@@ -65,6 +228,7 @@ defmodule Dynamo do
       end
     %{node | hash_map: new_hash_map, vector_clock: vector_clock}
   end
+
   @spec get(%Dynamo{},non_neg_integer()):: non_neg_integer() | :not_exist
   def get(
     node,
@@ -77,6 +241,26 @@ defmodule Dynamo do
       else
         node.value
       end
+  end
+
+  @spec node(%Dynamo{}) :: no_return()
+  def node(state) do
+    receive do
+      :set_heartbeat_timeout ->
+        state = setup_node_with_heartbeat(state)
+        node(state)
+      :set_checkout_timeout ->
+        state = checkout_failure(state, 0)
+        state = reset_checkout_timer(state)
+        node(state)
+      {sender, :heartbeat_msg} ->
+        node(handle_heartbeat_msg(state, sender))
+      {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
+        node(handle_heartbeat_msg(state, from_node))
+      {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
+        node(handle_node_failure_msg(state, failure_node))
+
+    end
   end
 
 end
