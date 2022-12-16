@@ -1,5 +1,5 @@
 defmodule Dynamo do
-  import Emulation, only: [send: 2, timer: 1, now: 0, whoami: 0]
+  import Emulation, only: [send: 2, timer: 1, now: 0, whoami: 0, cancel_timer: 1, timer: 2]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -21,7 +21,7 @@ defmodule Dynamo do
     message_list: nil,
     failure_node_list: nil,
     heartbeat_time: nil,
-    heartbeat_timer: nil
+    heartbeat_timer: nil,
     checkout_time: nil,
     checkout_timer: nil
   )
@@ -30,7 +30,7 @@ defmodule Dynamo do
     index,
     pref_list,
     heartbeat_time,
-    checkout_time,
+    checkout_time
     ) do
       %Dynamo{
         index: index,
@@ -65,7 +65,7 @@ defmodule Dynamo do
   @spec check_pref_list_with_failed_node(%Dynamo{}, any()) :: %Dynamo{}
   defp check_pref_list_with_failed_node(state, failed_node) do
     %{state | pref_list: state.pref_list |> Enum.filter(
-      fn neighbor_node -> neighbor_node!=failed_node end
+      fn neighbor_node -> neighbor_node != failed_node end
       )}
   end
 
@@ -79,15 +79,23 @@ defmodule Dynamo do
   # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
   @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
   defp init_msg_list(state) do
-    state = %{ state | pref_list: MapSet.new(state.pref_list)}
+    state = %{ state | message_list: MapSet.new(state.pref_list)}
     state
   end
 
   # This function will clear message_list and make it empty
   @spec clear_msg_list(%Dynamo{}) :: %Dynamo{}
   defp clear_msg_list(state) do
-    state = %{state | msg_list: MapSet.new()}
+    state = %{state | message_list: MapSet.new()}
     state
+  end
+
+  # This function will set up node with timers
+  @spec setup_node(%Dynamo{}) :: no_return()
+  def setup_node(state) do
+    state = setup_node_with_checkout(state)
+    state = setup_node_with_heartbeat(state)
+    dynamo(state, nil)
   end
 
 
@@ -116,14 +124,14 @@ defmodule Dynamo do
   end
 
   # This function will send heartbeat message to every node in the preference list
-  @spec send_heartbeat_msg(%Dynamo{}) :: %Dynamo{}
+  @spec send_heartbeat_msg(%Dynamo{}, non_neg_integer()) :: %Dynamo{}
   defp send_heartbeat_msg(state, idx) do
-    if(idx==length(state.pref_list)) {
+    if(idx==length(state.pref_list)) do
       state
-    } else {
+    else
       send(Enum.at(state.pref_list, idx), :heartbeat_msg)
       send_heartbeat_msg(state, idx+1)
-    }
+    end
   end
 
   # This function will take all necessary steps to make sure the node can send heartbeat properly
@@ -152,9 +160,9 @@ defmodule Dynamo do
   # if not then it will gossip about the node failure message to neighbor nodes
   @spec checkout_failure(%Dynamo{}, non_neg_integer()) :: %Dynamo{}
   defp checkout_failure(state, idx) do
-    if(idx==length(state.pref_list)) {
+    if(idx==length(state.pref_list)) do
       state
-    } else {
+    else
       neighbor_node = Enum.at(state.pref_list, idx)
       whether_received_heartbeat = MapSet.member?(state.message_list, neighbor_node)
       state = if whether_received_heartbeat do
@@ -166,7 +174,7 @@ defmodule Dynamo do
         state
       end
       checkout_failure(state, idx+1)
-    }
+    end
   end
 
   # Save a handle to the checkout timer.
@@ -187,6 +195,7 @@ defmodule Dynamo do
   end
 
   # This function will set up the node to make sure the node checkout failure nodes correctly
+  # Attention: this function should be called before setup_node_with_heartbeat since we need to init message list before sending heartbeat
   @spec setup_node_with_checkout(%Dynamo{}) :: %Dynamo{}
   defp setup_node_with_checkout(state) do
     state = init_msg_list(state)
@@ -204,7 +213,7 @@ defmodule Dynamo do
     else
       state = check_pref_list_with_failed_node(state, failed_node)
       state = add_failed_node(state, failed_node)
-      broadcast_to_pref_list(state, %Dynamo.NodeFailureMessage.new(failed_node))
+      broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(failed_node))
       state
     end
     state
@@ -294,16 +303,24 @@ defmodule Dynamo do
       #Gossip Potocol
       :set_heartbeat_timeout ->
         state = setup_node_with_heartbeat(state)
-        dynamo(state)
+        dynamo(state, extra_state)
       :set_checkout_timeout ->
         state = handle_checkout_timeout(state)
-        dynamo(state)
+        dynamo(state, extra_state)
       {sender, :heartbeat_msg} ->
-        dynamo(handle_heartbeat_msg(state, sender))
+        dynamo(handle_heartbeat_msg(state, sender), extra_state)
       {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
-        dynamo(handle_heartbeat_msg(state, from_node))
+        dynamo(handle_heartbeat_msg(state, from_node), extra_state)
       {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
-        dynamo(handle_node_failure_msg(state, failure_node))
+        dynamo(handle_node_failure_msg(state, failure_node), extra_state)
+
+      ## message for tests ####
+      {sender, :to_dead} ->
+        send(sender, :received_to_dead)
+
+      {sender, :get_failure_list} ->
+        send(sender, state.failure_node_list)
+        dynamo(state, extra_state)
     end
   end
 
