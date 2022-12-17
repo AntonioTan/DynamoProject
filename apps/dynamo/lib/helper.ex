@@ -144,3 +144,42 @@ defmodule Dynamo.NodeFailureMessage do
     }
   end
 end
+
+
+###### Message sent to client for test use ###########
+defmodule Dynamo.ClientPrefListMessage do
+  alias Dynamo.ClientPrefListMessage
+  defstruct(
+    pref_list: nil
+  )
+  def new(pref_list) do
+    %ClientPrefListMessage{
+      pref_list: pref_list
+    }
+  end
+end
+
+
+defmodule Dynamo.ClientFailureNodeListMessage do
+  alias Dynamo.ClientFailureNodeListMessage
+  defstruct(
+    failure_node_list: nil
+  )
+  def new(failure_node_list) do
+    %ClientFailureNodeListMessage{
+      failure_node_list: failure_node_list
+    }
+  end
+end
+
+defmodule Dynamo.ClientRangeNodeMapMessage do
+  alias Dynamo.ClientRangeNodeMapMessage
+  defstruct(
+    range_node_map: nil
+  )
+  def new(range_node_map) do
+    %ClientRangeNodeMapMessage{
+      range_node_map: range_node_map
+    }
+  end
+end
