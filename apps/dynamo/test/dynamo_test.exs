@@ -7,13 +7,13 @@ defmodule DynamoTest do
 
   # This function will get the name from view given index
   @spec getNameFromView(list({atom(), non_neg_integer()}), non_neg_integer()) :: {:atom, non_neg_integer()}
-  defp getNameFromView(view, idx) do
+  def getNameFromView(view, idx) do
     Enum.at(view, rem(idx, length(view)))
   end
 
   # This function will generate preference list for one node given N and its index in the ring
   @spec getPreferenceList(list({atom(), non_neg_integer()}), pos_integer(), non_neg_integer()) :: list({atom(), non_neg_integer()})
-  defp getPreferenceList(view, n, start_idx) do
+  def getPreferenceList(view, n, start_idx) do
     Enum.to_list(1..n-1)
     |> Enum.map(fn(x) ->
       getNameFromView(view, start_idx+x)
@@ -22,7 +22,7 @@ defmodule DynamoTest do
 
   # This function will generate a Dynamo configuration list given N
   @spec getConfigList(list({atom(), non_neg_integer()}), pos_integer(), pos_integer(), pos_integer(), pos_integer(), pos_integer()) :: list(%Dynamo{})
-  defp getConfigList(view, n, heartbeat_timeout, checkout_timeout, write_res, read_res) do
+  def getConfigList(view, n, heartbeat_timeout, checkout_timeout, write_res, read_res) do
     view
     |> Enum.with_index
     |> Enum.map(fn({{x,index}, i})->

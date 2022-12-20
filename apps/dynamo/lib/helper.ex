@@ -165,3 +165,67 @@ defmodule Dynamo.SynTransfer do
     }
   end
 end
+
+# This is the struct for heartbeat message received from other nodes and this should only be used to redirect
+defmodule Dynamo.RedirectedHeartbeatMessage do
+  alias Dynamo.RedirectedHeartbeatMessage
+  defstruct(
+    from: nil
+  )
+  def new(from) do
+    %RedirectedHeartbeatMessage {
+      from: from
+    }
+  end
+end
+
+# This is the struct used to gossip about the failure of one node
+defmodule Dynamo.NodeFailureMessage do
+  alias Dynamo.NodeFailureMessage
+  defstruct(
+    failure_node: nil
+  )
+  def new(failure_node) do
+    %NodeFailureMessage{
+      failure_node: failure_node
+    }
+  end
+end
+
+###### Message sent to client for test use ###########
+defmodule Dynamo.ClientPrefListMessage do
+  alias Dynamo.ClientPrefListMessage
+  defstruct(
+    pref_list: nil
+  )
+  def new(pref_list) do
+    %ClientPrefListMessage{
+      pref_list: pref_list
+    }
+  end
+end
+
+
+defmodule Dynamo.ClientFailureNodeListMessage do
+  alias Dynamo.ClientFailureNodeListMessage
+  defstruct(
+    failure_node_list: nil
+  )
+  def new(failure_node_list) do
+    %ClientFailureNodeListMessage{
+      failure_node_list: failure_node_list
+    }
+  end
+end
+
+defmodule Dynamo.ClientRangeNodeMapMessage do
+  alias Dynamo.ClientRangeNodeMapMessage
+  defstruct(
+    range_node_map: nil
+  )
+  def new(range_node_map) do
+    %ClientRangeNodeMapMessage{
+      range_node_map: range_node_map
+    }
+  end
+end
