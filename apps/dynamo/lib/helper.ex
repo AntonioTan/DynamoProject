@@ -111,7 +111,7 @@ defmodule Dynamo.GetResponse do
     is_replica: nil,
     client: nil
   )
-  @spec new(non_neg_integer(),non_neg_integer(),any(),boolean(),atom()) :: %GetResponse{}
+  @spec new(non_neg_integer(),non_neg_integer() | atom(),any(),boolean(),atom()) :: %GetResponse{}
   def new(key,value,vector_clock,is_replica,client) do
     %GetResponse{
       key: key,
