@@ -61,21 +61,25 @@ defmodule DynamoTest do
   end
 
   test "Set up nodes and check whether nodes input correctly synchronize" do
+    Emulation.init()
+    Emulation.append_fuzzers([Fuzzers.delay(2)])
     view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
-    # config_list=getConfigList(view, 3, 50, 5000, 1, 1)
-    # config_list
-    # |> Enum.with_index
-    # |> Enum.each(fn ({config,i}) ->
-    #   {node,_} =Enum.at(view,i)
-    #   IO.puts("Generating node for #{node}")
-    #   spawn(node, fn -> Dynamo.dynamo(config,[]) end)
-    # end)
+    config_list=getConfigList(view, 3, 50, 5000, 1, 1)
+    config_list
+    |> Enum.with_index
+    |> Enum.each(fn ({config,i}) ->
+      {node,_} =Enum.at(view,i)
+      IO.puts("Generating node for #{node}")
+      spawn(node, fn -> Dynamo.dynamo(config,[]) end)
+    end)
     dispatcher = Dynamo.Dispatcher.new(view)
     spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
     client = Dynamo.Client.new(500,:dispatcher)
     spawn(:client, fn ->
     Dynamo.Client.put(client, 0, 10)
     end)
+  after
+    Emulation.terminate()
   end
 
   test "Data for Plots" do
