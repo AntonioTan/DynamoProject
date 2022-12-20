@@ -108,17 +108,15 @@ defmodule Dynamo.GetResponse do
     key: nil,
     value: nil,
     vector_clock: nil,
-    is_same: nil,
     is_replica: nil,
     client: nil
   )
-  @spec new(non_neg_integer(),non_neg_integer(),any(),boolean(),boolean(),atom()) :: %GetResponse{}
-  def new(key,value,vector_clock,is_same,is_replica,client) do
+  @spec new(non_neg_integer(),non_neg_integer(),any(),boolean(),atom()) :: %GetResponse{}
+  def new(key,value,vector_clock,is_replica,client) do
     %GetResponse{
       key: key,
       value: value,
       vector_clock: vector_clock,
-      is_same: is_same,
       is_replica: is_replica,
       client: client
     }
