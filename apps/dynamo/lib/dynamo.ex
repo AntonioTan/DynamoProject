@@ -28,7 +28,7 @@ defmodule Dynamo do
     checkout_time: nil,
     checkout_timer: nil
   )
-  @spec new(non_neg_integer(),list(atom()), atom(), list(atom()),non_neg_integer(),non_neg_integer())::%Dynamo{}
+  @spec new(non_neg_integer(),list({atom(), non_neg_integer()}), atom(), list({atom(), non_neg_integer()}),non_neg_integer(),non_neg_integer())::%Dynamo{}
   def new(
     index,
     view,
@@ -60,7 +60,7 @@ defmodule Dynamo do
   @spec broadcast_to_pref_list(%Dynamo{}, any()) :: [(boolean)]
   defp broadcast_to_pref_list(state, msg) do
     state.pref_list
-      |> Enum.map(fn neighbor_node ->
+      |> Enum.map(fn ({neighbor_node, _}) ->
         send(neighbor_node, msg)
       end)
   end
@@ -81,17 +81,17 @@ defmodule Dynamo do
   end
 
   defp remove_failed_node_from_pref_list(state, failed_node) do
-    %{state | pref_list: state.pref_list |> Enum.filter(fn x -> x != failed_node end)}
+    %{state | pref_list: state.pref_list |> Enum.filter(fn ({x, _}) -> x != failed_node end)}
   end
 
   # This function will get the name from view given index
-  @spec getNameFromView(list(atom()), non_neg_integer()) :: :atom
+  @spec getNameFromView(list({atom(), non_neg_integer()}), non_neg_integer()) :: {atom(), non_neg_integer()}
   defp getNameFromView(view, idx) do
     Enum.at(view, rem(idx, length(view)))
   end
 
   # This function will generate preference list for one node given N and its index in the ring
-  @spec getPreferenceList(list(atom()), pos_integer(), non_neg_integer()) :: list(atom())
+  @spec getPreferenceList(list({atom(), non_neg_integer()}), pos_integer(), non_neg_integer()) :: list({atom(), non_neg_integer()})
   defp getPreferenceList(view, n, start_idx) do
     Enum.to_list(1..n-1)
     |> Enum.map(fn(x) ->
@@ -104,7 +104,7 @@ defmodule Dynamo do
   defp update_pref_list(state) do
     node = whoami()
     n = length(state.pref_list) + 1
-    idx = Enum.find_index(state.current_view, fn x -> x == node end)
+    idx = Enum.find_index(state.current_view, fn ({x, _}) -> x == node end)
     if idx == nil do
       state
     else
@@ -116,7 +116,7 @@ defmodule Dynamo do
   # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
   @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
   defp init_msg_list(state) do
-    state = %{ state | message_list: MapSet.new(state.pref_list)}
+    state = %{ state | message_list: MapSet.new(state.pref_list |> Enum.map(fn ({node, _}) -> node end))}
     state
   end
 
@@ -138,7 +138,7 @@ defmodule Dynamo do
   # This function will update current view with new failure_node_list to ensure no failure node exists in current view
   @spec update_current_view(%Dynamo{}) :: %Dynamo{}
   defp update_current_view(state) do
-    %{state | current_view: state.view |> Enum.filter(fn x -> !MapSet.member?(state.failure_node_list, x)end)}
+    %{state | current_view: state.view |> Enum.filter(fn ({x, _}) -> !MapSet.member?(state.failure_node_list, x)end)}
   end
 
 
@@ -172,7 +172,8 @@ defmodule Dynamo do
     if(idx>=length(state.pref_list)) do
       state
     else
-      send(Enum.at(state.pref_list, idx), :heartbeat_msg)
+      {node, _} = Enum.at(state.pref_list, idx)
+      send(node, :heartbeat_msg)
       send_heartbeat_msg(state, idx+1)
     end
   end
@@ -206,7 +207,7 @@ defmodule Dynamo do
     if(idx >= length(state.pref_list)) do
       state
     else
-      neighbor_node = Enum.at(state.pref_list, idx)
+      {neighbor_node, _} = Enum.at(state.pref_list, idx)
       whether_received_heartbeat = MapSet.member?(state.message_list, neighbor_node)
       state = if whether_received_heartbeat do
         state
@@ -446,7 +447,7 @@ defmodule Dynamo.Dispatcher do
     range_node_map: nil
   ) # [{node,index}], sorted as the index increase
 
-  @spec new([{non_neg_integer(),atom()}]) :: %Dispatcher{}
+  @spec new([{atom(),non_neg_integer()}]) :: %Dispatcher{}
   def new(range_node_map) do
     %Dispatcher{range_node_map: range_node_map}
   end
