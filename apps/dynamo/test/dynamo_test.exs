@@ -64,7 +64,7 @@ defmodule DynamoTest do
     Emulation.init()
     Emulation.append_fuzzers([Fuzzers.delay(2)])
     view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
-    config_list=getConfigList(view, 3, 50, 5000, 1, 1)
+    config_list=getConfigList(view, 3, 50, 5000, 2, 2)
     config_list
     |> Enum.with_index
     |> Enum.each(fn ({config,i}) ->
@@ -98,6 +98,73 @@ defmodule DynamoTest do
   end
 
   test "Data for Plots" do
+    view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
+    n = 3
+    w = 2
+    r = 2
+    interval_num = 20
+    test_times = 100
+    Enum.to_list(0..interval_num) |> Enum.map(
+      fn(interval_idx) ->
+        single_version_num = Enum.to_list(0..test_times) |> Enum.map(
+          fn(test_time) ->
+            IO.puts("Starting the #{test_time} test.....")
+            Emulation.init()
+            Emulation.append_fuzzers([Fuzzers.delay(2)])
+            result = 0
+            time_interval = 50*interval_idx
+            config_list=getConfigList(view, 3, 50, 5000, 2, 2)
+            config_list
+            |> Enum.with_index
+            |> Enum.each(fn ({config,i}) ->
+              {node,_} =Enum.at(view,i)
+              # IO.puts("Generating node for #{node}")
+              spawn(node, fn -> Dynamo.dynamo(config,[]) end)
+            end)
+            dispatcher = Dynamo.Dispatcher.new(view)
+            spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+            client = Dynamo.Client.new(500,:dispatcher)
+            client_thread=
+              spawn(:client, fn ->
+            tmp=Dynamo.Client.put(client, 0, 10)
+            IO.inspect(tmp)
+            receive do
+            after
+              time_interval -> :ok
+            end
+            result = Dynamo.Client.get(client, 0)
+            # assert result ==5
+            end)
+            handle = Process.monitor(client_thread)
+            # Timeout.
+            receive do
+              {:DOWN, ^handle, _, _, _} -> true
+            after
+              5_000 ->
+                assert false
+            end
+            result
+          end
+        ) |> Enum.filter(fn(x) -> x end) |> Enum.count()
+        single_version_num * 1.0 / (test_times * 1.0)
+      end
+    ) |> Enum.with_index |> Enum.each(fn({single_version_rate, idx}) ->
+      IO.puts("With time interval: #{50*idx}, the rate of single version storage is: #{single_version_rate}")
+    end)
+  after
+    Emulation.terminate()
 
+  end
+
+  test "Spawn two processes with the same name" do
+    Emulation.init()
+    Emulation.append_fuzzers([Fuzzers.delay(2)])
+    view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
+    dispatcher = Dynamo.Dispatcher.new(view)
+    spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+    Emulation.init()
+    spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+  after
+    Emulation.terminate()
   end
 end
