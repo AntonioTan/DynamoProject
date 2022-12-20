@@ -82,6 +82,7 @@ defmodule DynamoTest do
       spawn(:client, fn ->
     tmp=Dynamo.Client.put(client, 0, 10)
     # IO.inspect(tmp)
+    tmp=Dynamo.Client.put(client, 0, 11)
     receive do
     after
       50 -> assert true

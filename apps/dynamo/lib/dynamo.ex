@@ -510,7 +510,7 @@ defmodule Dynamo do
         if state.write_res == 1 do
           send(sender, Dynamo.PutResponse.new(key, hash_code, true, false, client))
         end
-        extra_state = [{:w, client, key, 1} | extra_state]
+        extra_state = [{:w, client, key, true, 1} | extra_state]
         broadcast_to_pref_list(
           state,
           Dynamo.PutRequest.new(
@@ -549,7 +549,7 @@ defmodule Dynamo do
           case Enum.at(
                  Enum.filter(
                    extra_state,
-                   fn {wr_tmp, client_tmp, key_tmp, _} ->
+                   fn {wr_tmp, client_tmp, key_tmp,_, _} ->
                      ((wr_tmp == :w) and (client_tmp == client) and (key_tmp == key))
                    end
                  ),
@@ -561,9 +561,9 @@ defmodule Dynamo do
               extra_state
 
             item ->
-              # IO.inspect("Update extra_state #{sender}")
-              # IO.inspect(extra_state)
-              {_, _, _, vote_num} = item
+              IO.inspect("Update extra_state #{sender}")
+              IO.inspect(extra_state)
+              {_, _, _,_, vote_num} = item
 
               if vote_num + 1 >= state.write_res do
                 # IO.puts("Send Write feedback")
@@ -578,10 +578,10 @@ defmodule Dynamo do
                   )
                 )
               end
-              item = Tuple.append(Tuple.delete_at(item, 3), vote_num + 1)
+              item = Tuple.append(Tuple.delete_at(item, 4), vote_num + 1)
               extra_state =  [ item | Enum.filter(
                 extra_state,
-                fn {wr_tmp, client_tmp, key_tmp, _} ->
+                fn {wr_tmp, client_tmp, key_tmp, _, _} ->
                   ((wr_tmp != :w) or (client_tmp != client) or (key_tmp != key))
                 end
               )]
@@ -616,9 +616,9 @@ defmodule Dynamo do
           end
           extra_state =
             if entry != :not_exist do
-              [{:r, client, key, 1} | extra_state]
+              [{:r, client, key, true, 1} | extra_state]
             else
-              [{:r, client, key, 0} | extra_state]
+              [{:r, client, key, false, 1} | extra_state]
             end
           broadcast_to_pref_list(state, Dynamo.GetRequest.new(key, true, client))
 
@@ -635,6 +635,8 @@ defmodule Dynamo do
         if entry != :not_exist do
           {_, %Dynamo.Object{value: value, vector_clock: vector_clock}} = entry
           send(sender, Dynamo.GetResponse.new(key, value, vector_clock, true, client))
+        else
+          send(sender, Dynamo.GetResponse.new(key, :not_exist, [], true, client))
         end
 
         dynamo(state, extra_state)
@@ -647,11 +649,19 @@ defmodule Dynamo do
          is_replica: true,
          client: client
        }} ->
+        local_entry = List.keyfind(state.hash_map, key, 0, :not_exist)
+        is_same=
+        if local_entry != :not_exist do
+          {_, %Dynamo.Object{value: local_value, vector_clock: local_vector_clock}} = local_entry
+          local_value == value
+        else
+          false
+        end
         extra_state =
           case Enum.at(
                  Enum.filter(
                    extra_state,
-                   fn {wr_tmp, client_tmp, key_tmp, _} ->
+                   fn {wr_tmp, client_tmp, key_tmp,_, _} ->
                      ((wr_tmp == :r) and (client_tmp == client) and (key_tmp == key))
                    end
                  ),
@@ -663,7 +673,7 @@ defmodule Dynamo do
 
             item ->
               # IO.inspect("Update read extra_state #{sender}")
-              {_, _, _, vote_num} = item
+              {wr_tmp, client_tmp, key_tmp,prev_same, vote_num} = item
 
               if vote_num + 1 >= state.read_res do
                 # IO.puts("Send Read feedback")
@@ -673,16 +683,16 @@ defmodule Dynamo do
                     key,
                     value,
                     vector_clock,
-                    false,
+                    (prev_same and is_same),
                     client
                   )
                 )
               end
 
-              item = Tuple.append(Tuple.delete_at(item, 3), vote_num + 1)
+              item = {wr_tmp, client_tmp, key_tmp,(prev_same and is_same), vote_num + 1}
               extra_state =  [ item | Enum.filter(
                 extra_state,
-                fn {wr_tmp, client_tmp, key_tmp, _} ->
+                fn {wr_tmp, client_tmp, key_tmp,_, _} ->
                   ((wr_tmp != :r) or (client_tmp != client) or (key_tmp != key))
                 end
               )]
@@ -860,11 +870,11 @@ defmodule Dynamo.Dispatcher do
          key: key,
          value: value,
          vector_clock: vector_clock,
-         is_replica: false,
+         is_replica: is_same,
          client: client
        }} ->
         # IO.inspect("Get Response")
-        send(client, {:ok, value})
+        send(client, {:ok, value, is_same})
         dispatcher(state, extra_state)
 
       {sender, {client, :not_exist}} ->
@@ -930,11 +940,11 @@ defmodule Dynamo.Client do
 
       {_, :not_exist} ->
         Emulation.cancel_timer(t)
-        :not_exist
+        {:not_exist, false}
 
-      {_, {:ok, value}} ->
+      {_, {:ok, value, is_same}} ->
         Emulation.cancel_timer(t)
-        value
+        {value, is_same}
     end
   end
 end
