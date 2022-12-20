@@ -10,18 +10,22 @@ defmodule HashTest do
     result = rem(:binary.decode_unsigned(hash_code),365)
     result
   end
-  test "Hash Tree used correct" do
-    result= MerkleTree.Crypto.hash("tendermint", :md5)
-    number_result = calculate_pos(result)
-    IO.puts(number_result)
-    assert MerkleTree.Crypto.hash("tendermint", :md5) == "bc93700bdf1d47ad28654ad93611941f"
-  end
+  # test "Hash Tree used correct" do
+  #   result= MerkleTree.Crypto.hash("tendermint", :md5)
+  #   number_result = calculate_pos(result)
+  #   IO.puts(number_result)
+  #   assert MerkleTree.Crypto.hash("tendermint", :md5) == "bc93700bdf1d47ad28654ad93611941f"
+  # end
 
   test "Build hash tree with own hash function" do
-    mt = MerkleTree.new(["a", "b", "c","d"],&hash_function/1)
+    mt = MerkleTree.new(["a", "b", "c","d"])
     mt2=  MerkleTree.new(["a","b","c","e"],&hash_function/1)
+    mt3=MerkleTree.fast_root(["a", "b", "c","d"])
+
     # assert mt==mt2
-    IO.inspect(mt)
-    IO.inspect(mt2)
+    IO.inspect(mt.root.value)
+    IO.inspect(mt3)
+    # IO.inspect(MerkleTree.Proof.prove(mt,0))
+    # IO.inspect(MerkleTree.Proof.prove(mt2,0))
   end
 end
