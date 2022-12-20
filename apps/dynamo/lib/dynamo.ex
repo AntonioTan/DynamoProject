@@ -15,12 +15,14 @@ defmodule Dynamo do
   defstruct(
     index: nil,
     pref_list: nil,
-    hash_map: nil, # Store the k-value list
+    # Store the k-value list
+    hash_map: nil,
     dispatcher: nil,
     view: nil,
     current_view: nil,
     dispatcher: nil,
-    hash_tree_list: nil, # A {range:,hash_tree:} map. For each range, build a hash tree.
+    # A {range:,hash_tree:} map. For each range, build a hash tree.
+    hash_tree_list: nil,
     # Control the gossip protocol
     message_list: nil,
     failure_node_list: nil,
@@ -36,6 +38,7 @@ defmodule Dynamo do
 
   @spec new(
           non_neg_integer(),
+          atom(),
           [atom()],
           [{atom(), non_neg_integer()}],
           non_neg_integer(),
@@ -45,6 +48,7 @@ defmodule Dynamo do
         ) :: %Dynamo{}
   def new(
         index,
+        dispatcher,
         pref_list,
         view,
         heartbeat_time,
@@ -54,6 +58,7 @@ defmodule Dynamo do
       ) do
     %Dynamo{
       index: index,
+      dispatcher: dispatcher,
       pref_list: pref_list,
       #
       hash_map: [],
@@ -76,49 +81,53 @@ defmodule Dynamo do
         key,
         value
       ) do
-    map_term = List.keyfind(node.hash_map, key, 0 , :none)
-    object=
+    map_term = List.keyfind(node.hash_map, key, 0, :none)
+
+    object =
       if map_term == :none do
         :none
       else
-        {_,tmp_obj}=map_term
+        {_, tmp_obj} = map_term
         tmp_obj
       end
 
     new_object =
       if object == :none do
-        object = Dynamo.Object.new(value, key, [{node.index,1}])
+        object = Dynamo.Object.new(value, key, [{node.index, 1}])
       else
-        clock_entry=List.keyfind(object.vector_clock, node.index, 0,:none)
-        new_clock=
+        clock_entry = List.keyfind(object.vector_clock, node.index, 0, :none)
+
+        new_clock =
           if clock_entry == :none do
             [{node.index, 1} | object.vector_clock]
           else
             {_, counter} = clock_entry
             List.keyreplace(object.vector_clock, node.index, 0, {node.index, counter + 1})
           end
-        object=%{object | value: value, vector_clock: new_clock}
+
+        object = %{object | value: value, vector_clock: new_clock}
       end
+
     new_hash_map =
       if map_term == :none do
-        List.keysort([{key,new_object} | node.hash_map], 0)
+        List.keysort([{key, new_object} | node.hash_map], 0)
       else
-        List.keyreplace(node.hash_map,key,0, {key,new_object})
+        List.keyreplace(node.hash_map, key, 0, {key, new_object})
       end
+
     %{node | hash_map: new_hash_map}
   end
 
   ############### HELPER FUNCTION ###########################
 
   # This function broadcasts the given message to every node in the preference list
-  @spec broadcast_to_pref_list(%Dynamo{}, any()) :: [(boolean)]
+  @spec broadcast_to_pref_list(%Dynamo{}, any()) :: [boolean]
   defp broadcast_to_pref_list(state, msg) do
     state.pref_list
-      |> Enum.map(fn ({neighbor_node, _}) ->
-        send(neighbor_node, msg)
-      end)
+    |> Enum.map(fn {neighbor_node, _} ->
+      send(neighbor_node, msg)
+    end)
   end
-
 
   # # This function will filter out failed node from pref_list
   # @spec check_pref_list_with_failed_node(%Dynamo{}, any()) :: %Dynamo{}
@@ -135,21 +144,23 @@ defmodule Dynamo do
   end
 
   defp remove_failed_node_from_pref_list(state, failed_node) do
-    %{state | pref_list: state.pref_list |> Enum.filter(fn ({x, _}) -> x != failed_node end)}
+    %{state | pref_list: state.pref_list |> Enum.filter(fn {x, _} -> x != failed_node end)}
   end
 
   # This function will get the name from view given index
-  @spec getNameFromView(list({atom(), non_neg_integer()}), non_neg_integer()) :: {atom(), non_neg_integer()}
+  @spec getNameFromView(list({atom(), non_neg_integer()}), non_neg_integer()) ::
+          {atom(), non_neg_integer()}
   defp getNameFromView(view, idx) do
     Enum.at(view, rem(idx, length(view)))
   end
 
   # This function will generate preference list for one node given N and its index in the ring
-  @spec getPreferenceList(list({atom(), non_neg_integer()}), pos_integer(), non_neg_integer()) :: list({atom(), non_neg_integer()})
+  @spec getPreferenceList(list({atom(), non_neg_integer()}), pos_integer(), non_neg_integer()) ::
+          list({atom(), non_neg_integer()})
   defp getPreferenceList(view, n, start_idx) do
-    Enum.to_list(1..n-1)
-    |> Enum.map(fn(x) ->
-      getNameFromView(view, start_idx+x)
+    Enum.to_list(1..(n - 1))
+    |> Enum.map(fn x ->
+      getNameFromView(view, start_idx + x)
     end)
   end
 
@@ -158,7 +169,8 @@ defmodule Dynamo do
   defp update_pref_list(state) do
     node = whoami()
     n = length(state.pref_list) + 1
-    idx = Enum.find_index(state.current_view, fn ({x, _}) -> x == node end)
+    idx = Enum.find_index(state.current_view, fn {x, _} -> x == node end)
+
     if idx == nil do
       state
     else
@@ -170,7 +182,11 @@ defmodule Dynamo do
   # we assume this node has received heartbeat from every node in pref_list when it is set up for the first time
   @spec init_msg_list(%Dynamo{}) :: %Dynamo{}
   defp init_msg_list(state) do
-    state = %{ state | message_list: MapSet.new(state.pref_list |> Enum.map(fn ({node, _}) -> node end))}
+    state = %{
+      state
+      | message_list: MapSet.new(state.pref_list |> Enum.map(fn {node, _} -> node end))
+    }
+
     state
   end
 
@@ -192,12 +208,14 @@ defmodule Dynamo do
   # This function will update current view with new failure_node_list to ensure no failure node exists in current view
   @spec update_current_view(%Dynamo{}) :: %Dynamo{}
   defp update_current_view(state) do
-    %{state | current_view: state.view |> Enum.filter(fn ({x, _}) -> !MapSet.member?(state.failure_node_list, x)end)}
+    %{
+      state
+      | current_view:
+          state.view |> Enum.filter(fn {x, _} -> !MapSet.member?(state.failure_node_list, x) end)
+    }
   end
 
-
   ############### END OF HELPER FUNCTION ###########################
-
 
   ############### GOSSIP PROTOCOL ###########################
   # Save a handle to the hearbeat timer.
@@ -215,6 +233,7 @@ defmodule Dynamo do
     if state.heartbeat_timer != nil do
       cancel_timer(state.heartbeat_timer)
     end
+
     heartbeat_timer = timer(state.heartbeat_time, :set_heartbeat_timeout)
     state = save_heartbeat_timer(state, heartbeat_timer)
     state
@@ -223,12 +242,12 @@ defmodule Dynamo do
   # This function will send heartbeat message to every node in the preference list
   @spec send_heartbeat_msg(%Dynamo{}, non_neg_integer()) :: %Dynamo{}
   defp send_heartbeat_msg(state, idx) do
-    if(idx>=length(state.pref_list)) do
+    if(idx >= length(state.pref_list)) do
       state
     else
       {node, _} = Enum.at(state.pref_list, idx)
       send(node, :heartbeat_msg)
-      send_heartbeat_msg(state, idx+1)
+      send_heartbeat_msg(state, idx + 1)
     end
   end
 
@@ -244,12 +263,15 @@ defmodule Dynamo do
   @spec handle_heartbeat_msg(%Dynamo{}, any()) :: %Dynamo{}
   defp handle_heartbeat_msg(state, sender) do
     already_received = MapSet.member?(state.message_list, sender)
-    state = if already_received do
-      state
-    else
-      broadcast_to_pref_list(state, %Dynamo.RedirectedHeartbeatMessage{from: sender})
-      %{state | message_list: MapSet.put(state.message_list, sender)}
-    end
+
+    state =
+      if already_received do
+        state
+      else
+        broadcast_to_pref_list(state, %Dynamo.RedirectedHeartbeatMessage{from: sender})
+        %{state | message_list: MapSet.put(state.message_list, sender)}
+      end
+
     state
   end
 
@@ -263,25 +285,28 @@ defmodule Dynamo do
     else
       {neighbor_node, _} = Enum.at(state.pref_list, idx)
       whether_received_heartbeat = MapSet.member?(state.message_list, neighbor_node)
-      state = if whether_received_heartbeat do
-        state
-      else
-        broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(neighbor_node))
-        state = handle_current_view_change(state, neighbor_node)
-        state
-      end
-      checkout_failure(state, idx+1)
+
+      state =
+        if whether_received_heartbeat do
+          state
+        else
+          broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(neighbor_node))
+          state = handle_current_view_change(state, neighbor_node)
+          state
+        end
+
+      checkout_failure(state, idx + 1)
     end
   end
 
   # This function will change view according to failed node and change preference list given new current view
   @spec handle_current_view_change(%Dynamo{}, atom()) :: %Dynamo{}
   defp handle_current_view_change(state, failed_node) do
-      state = add_failed_node(state, failed_node)
-      state = update_current_view(state)
-      state = update_pref_list(state)
-      state = init_msg_list(state)
-      state
+    state = add_failed_node(state, failed_node)
+    state = update_current_view(state)
+    state = update_pref_list(state)
+    state = init_msg_list(state)
+    state
   end
 
   # Save a handle to the checkout timer.
@@ -296,6 +321,7 @@ defmodule Dynamo do
     if state.checkout_timer != nil do
       cancel_timer(state.checkout_timer)
     end
+
     checkout_timer = timer(state.checkout_time, :set_checkout_timeout)
     state = save_checkout_timer(state, checkout_timer)
     state
@@ -314,15 +340,18 @@ defmodule Dynamo do
   @spec handle_node_failure_msg(%Dynamo{}, any()) :: %Dynamo{}
   defp handle_node_failure_msg(state, failed_node) do
     already_received = MapSet.member?(state.failure_node_list, failed_node)
-    state = if already_received do
-      state
-    else
-      broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(failed_node))
-      send(state.dispatcher, Dynamo.NodeFailureMessage.new(failed_node))
-      state = handle_current_view_change(state, failed_node)
-      IO.puts("Node #{whoami()} Create failure message for #{failed_node}")
-      state
-    end
+
+    state =
+      if already_received do
+        state
+      else
+        broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(failed_node))
+        send(state.dispatcher, Dynamo.NodeFailureMessage.new(failed_node))
+        state = handle_current_view_change(state, failed_node)
+        IO.puts("Node #{whoami()} Create failure message for #{failed_node}")
+        state
+      end
+
     state
   end
 
@@ -342,20 +371,23 @@ defmodule Dynamo do
         node,
         key
       ) do
-    map_term = List.keyfind(node.hash_map, key, 0 ,:none)
-    object=
+    map_term = List.keyfind(node.hash_map, key, 0, :none)
+
+    object =
       if map_term == :none do
         :none
       else
-        {_,tmp_object}=map_term
+        {_, tmp_object} = map_term
         tmp_object
       end
+
     value =
       if object == :none do
         :not_exist
       else
         object.value
       end
+
     value
   end
 
@@ -365,6 +397,7 @@ defmodule Dynamo do
       case List.last(Enum.filter(node_map, fn {_, index} -> index < key end), :none) do
         :none ->
           :none
+
         {_, index} ->
           index
       end
@@ -373,17 +406,18 @@ defmodule Dynamo do
       case List.first(Enum.filter(node_map, fn {_, index} -> index >= key end), :none) do
         :none ->
           :none
+
         {_, index} ->
           index
       end
+
     if startIndex == :none or endIndex == :none do
-      {_,e}=List.first(node_map)
-      {_,s}=List.last(node_map)
-      {s,e}
+      {_, e} = List.first(node_map)
+      {_, s} = List.last(node_map)
+      {s, e}
     else
       {startIndex, endIndex}
     end
-
   end
 
   @spec find_data([any()], {non_neg_integer(), non_neg_integer()}) :: [any()]
@@ -398,6 +432,7 @@ defmodule Dynamo do
       else
         list =
           Enum.filter(hash_map, fn {index, _} -> index > startIndex and index <= endIndex end)
+
         list
       end
 
@@ -411,14 +446,14 @@ defmodule Dynamo do
     return_list =
       if endIndex < startIndex do
         mid_list =
-          Enum.filter(hash_map, fn {index,_} -> index > endIndex and index <= startIndex end)
+          Enum.filter(hash_map, fn {index, _} -> index > endIndex and index <= startIndex end)
 
-        first_list = Enum.filter(data, fn {index,_} -> index > startIndex end)
-        second_list = Enum.filter(data, fn {index,_} -> index <= endIndex end)
+        first_list = Enum.filter(data, fn {index, _} -> index > startIndex end)
+        second_list = Enum.filter(data, fn {index, _} -> index <= endIndex end)
         first_list ++ mid_list ++ second_list
       else
-        first_list = Enum.filter(hash_map, fn {index,_} -> index <= startIndex end)
-        second_list = Enum.filter(hash_map, fn {index,_} -> index > endIndex end)
+        first_list = Enum.filter(hash_map, fn {index, _} -> index <= startIndex end)
+        second_list = Enum.filter(hash_map, fn {index, _} -> index > endIndex end)
         first_list ++ data ++ second_list
       end
 
@@ -471,8 +506,11 @@ defmodule Dynamo do
          is_replica: false,
          client: client
        }} ->
-        state = put(state, key, Dynamo.Object.new(value, hash_code, vector_clock))
-
+        state = put(state, key, value)
+        if state.write_res == 1 do
+          send(sender, Dynamo.PutResponse.new(key, hash_code, true, false, client))
+        end
+        extra_state = [{:w, client, key, 1} | extra_state]
         broadcast_to_pref_list(
           state,
           Dynamo.PutRequest.new(
@@ -484,15 +522,6 @@ defmodule Dynamo do
             client
           )
         )
-
-        extra_state =
-          if state.write_res == 1 do
-            send(sender, Dynamo.PutResponse.new(key, hash_code, true, false, client))
-            extra_state
-          else
-            extra_state = [{:w, client, key, 1} | extra_state]
-          end
-
         dynamo(state, extra_state)
 
       {sender,
@@ -504,7 +533,7 @@ defmodule Dynamo do
          is_replica: true,
          client: client
        }} ->
-        state = put(state, key, Dynamo.Object.new(value, hash_code, vector_clock))
+        state = put(state, key, value)
         send(sender, Dynamo.PutResponse.new(key, hash_code, true, true, client))
         dynamo(state, extra_state)
 
@@ -521,21 +550,25 @@ defmodule Dynamo do
                  Enum.filter(
                    extra_state,
                    fn {wr_tmp, client_tmp, key_tmp, _} ->
-                     wr_tmp == :w and client_tmp == client and key_tmp == key
+                     ((wr_tmp == :w) and (client_tmp == client) and (key_tmp == key))
                    end
                  ),
                  0,
                  :none
                ) do
             :none ->
+
               extra_state
 
             item ->
+              IO.inspect("Update extra_state #{sender}")
+              IO.inspect(extra_state)
               {_, _, _, vote_num} = item
 
-              if vote_num + 1 > state.write_res do
+              if vote_num + 1 >= state.write_res do
+                IO.puts("Send Write feedback")
                 send(
-                  client,
+                  state.dispatcher,
                   Dynamo.PutResponse.new(
                     key,
                     hash_code,
@@ -544,21 +577,25 @@ defmodule Dynamo do
                     client
                   )
                 )
-
-                extra_state = [Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state]
-              else
-                if vote_num + 1 >= length(state.pref_list) do
-                  # Start synchronize
-                  syn_pref(state, key)
-                  extra_state = List.delete(extra_state, item)
-                else
-                  extra_state = [
-                    Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state
-                  ]
+              end
+              item = Tuple.append(Tuple.delete_at(item, 3), vote_num + 1)
+              extra_state =  [ item | Enum.filter(
+                extra_state,
+                fn {wr_tmp, client_tmp, key_tmp, _} ->
+                  ((wr_tmp != :w) or (client_tmp != client) or (key_tmp != key))
                 end
+              )]
+              extra_state=
+              if vote_num  >= length(state.pref_list) do
+                # Start synchronize
+                syn_pref(state, key)
+                extra_state = List.delete(extra_state, item)
+              else
+                extra_state
               end
           end
-          dynamo(state, extra_state)
+
+        dynamo(state, extra_state)
 
       {sender,
        %Dynamo.GetRequest{
@@ -567,29 +604,23 @@ defmodule Dynamo do
          client: client
        }} ->
         IO.inspect("Get")
-        entry=List.keyfind(state.hash_map, key, 0, :not_exist)
-        extra_state =
-          if state.write_res == 1 do
+        entry = List.keyfind(state.hash_map, key, 0, :not_exist)
+
+          if state.read_res == 1 do
             if entry != :not_exist do
               {_, %Dynamo.Object{value: value, vector_clock: vector_clock}} = entry
-              IO.inspect("P1")
               send(sender, Dynamo.GetResponse.new(key, value, vector_clock, false, client))
-              extra_state
             else
-              IO.inspect("P2")
-              send(sender, {client,:not_exist})
+              send(sender, {client, :not_exist})
             end
-          else
-            IO.inspect("P3")
-            broadcast_to_pref_list(state, Dynamo.GetRequest.new(key, true, client))
-            extra_state =
-              if entry != :not_exist do
-                [{:r, client, key, 1} | extra_state]
-              else
-                [{:r, client, key, 0} | extra_state]
-              end
-            extra_state
           end
+          extra_state =
+            if entry != :not_exist do
+              [{:r, client, key, 1} | extra_state]
+            else
+              [{:r, client, key, 0} | extra_state]
+            end
+          broadcast_to_pref_list(state, Dynamo.GetRequest.new(key, true, client))
 
         dynamo(state, extra_state)
 
@@ -599,11 +630,13 @@ defmodule Dynamo do
          is_replica: true,
          client: client
        }} ->
-        entry=List.keyfind(state.hash_map, key, 0, :not_exist)
+        entry = List.keyfind(state.hash_map, key, 0, :not_exist)
+
         if entry != :not_exist do
           {_, %Dynamo.Object{value: value, vector_clock: vector_clock}} = entry
           send(sender, Dynamo.GetResponse.new(key, value, vector_clock, true, client))
         end
+
         dynamo(state, extra_state)
 
       {sender,
@@ -619,7 +652,7 @@ defmodule Dynamo do
                  Enum.filter(
                    extra_state,
                    fn {wr_tmp, client_tmp, key_tmp, _} ->
-                     wr_tmp == :r and client_tmp == client and key_tmp == key
+                     ((wr_tmp == :r) and (client_tmp == client) and (key_tmp == key))
                    end
                  ),
                  0,
@@ -629,11 +662,13 @@ defmodule Dynamo do
               extra_state
 
             item ->
+              IO.inspect("Update read extra_state #{sender}")
               {_, _, _, vote_num} = item
 
-              if vote_num + 1 > state.write_res do
+              if vote_num + 1 >= state.read_res do
+                IO.puts("Send Read feedback")
                 send(
-                  client,
+                  state.dispatcher,
                   Dynamo.GetResponse.new(
                     key,
                     value,
@@ -642,18 +677,24 @@ defmodule Dynamo do
                     client
                   )
                 )
-
-                extra_state = [Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state]
-              else
-                if vote_num + 1 >= length(state.pref_list) do
-                  # Start synchronize
-                  syn_pref(state, key)
-                  extra_state = List.delete(extra_state, item)
-                else
-                  extra_state = [
-                    Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state]
-                end
               end
+
+              item = Tuple.append(Tuple.delete_at(item, 3), vote_num + 1)
+              extra_state =  [ item | Enum.filter(
+                extra_state,
+                fn {wr_tmp, client_tmp, key_tmp, _} ->
+                  ((wr_tmp != :r) or (client_tmp != client) or (key_tmp != key))
+                end
+              )]
+              extra_state=
+              if vote_num  >= length(state.pref_list) do
+                # Start synchronize
+                syn_pref(state, key)
+                extra_state = List.delete(extra_state, item)
+              else
+                extra_state
+              end
+              extra_state
           end
 
         dynamo(state, extra_state)
@@ -682,6 +723,7 @@ defmodule Dynamo do
           data = find_data(state.hash_map, range)
           send(sender, Dynamo.SynTransfer.new(range, data))
         end
+
         dynamo(state, extra_state)
 
       {sender,
@@ -691,18 +733,23 @@ defmodule Dynamo do
        }} ->
         update_data(state.hash_map, range, data)
         dynamo(state, extra_state)
-      #Gossip Potocol
+
+      # Gossip Potocol
       :set_heartbeat_timeout ->
         IO.puts("Node #{whoami()} received heartbeat_timeout")
         state = setup_node_with_heartbeat(state)
         dynamo(state, extra_state)
+
       :set_checkout_timeout ->
         state = handle_checkout_timeout(state)
         dynamo(state, extra_state)
+
       {sender, :heartbeat_msg} ->
         dynamo(handle_heartbeat_msg(state, sender), extra_state)
+
       {sender, %Dynamo.RedirectedHeartbeatMessage{from: from_node}} ->
         dynamo(handle_heartbeat_msg(state, from_node), extra_state)
+
       {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
         # IO.puts("Node #{whoami()} received node failure msg: node #{failure_node} is dead")
         dynamo(handle_node_failure_msg(state, failure_node), extra_state)
@@ -745,13 +792,16 @@ defmodule Dynamo.Dispatcher do
 
   defstruct(node_map: nil)
 
-
   ##### GOSSIP PROTOCOL #####
 
   # This function will delete failure node from range node map
   @spec update_range_node_map_with_failure_node(%Dispatcher{}, atom()) :: %Dispatcher{}
   defp update_range_node_map_with_failure_node(state, failure_node) do
-    %{state | range_node_map: state.range_node_map |> Enum.filter(fn({node, idx}) -> node != failure_node end)}
+    %{
+      state
+      | range_node_map:
+          state.range_node_map |> Enum.filter(fn {node, idx} -> node != failure_node end)
+    }
   end
 
   ##### END OF GOSSIP PROTOCOL ####
@@ -783,6 +833,7 @@ defmodule Dynamo.Dispatcher do
     receive do
       {sender, {:put, key, value}} ->
         node = find_node(state.node_map, key)
+        IO.inspect("Put #{key} on #{node}")
         hash_code = hash_fun(key)
         send(node, Dynamo.PutRequest.new(key, value, hash_code, [], false, sender))
         dispatcher(state, extra_state)
@@ -799,9 +850,8 @@ defmodule Dynamo.Dispatcher do
         dispatcher(state, extra_state)
 
       {sender, {:get, key}} ->
-
         node = find_node(state.node_map, key)
-        IO.inspect(node)
+        IO.inspect("Get #{key} on #{node}")
         send(node, Dynamo.GetRequest.new(key, false, sender))
         dispatcher(state, extra_state)
 
@@ -813,6 +863,7 @@ defmodule Dynamo.Dispatcher do
          is_replica: false,
          client: client
        }} ->
+        IO.inspect("Get Response")
         send(client, {:ok, value})
         dispatcher(state, extra_state)
 
@@ -824,11 +875,12 @@ defmodule Dynamo.Dispatcher do
       {sender, %Dynamo.NodeFailureMessage{failure_node: failure_node}} ->
         state = update_range_node_map_with_failure_node(state, failure_node)
         dispatcher(state, extra_state)
+
       ### Deal CLIENT REQUEST FOR TEST USE ###
       {sender, :getRangeNodeMap} ->
         send(sender, Dynamo.ClientRangeNodeMapMessage.new(state.range_node_map))
         dispatcher(state, extra_state)
-      ###### END OF GOSSIP PROTOCOL #######
+        ###### END OF GOSSIP PROTOCOL #######
     end
   end
 end

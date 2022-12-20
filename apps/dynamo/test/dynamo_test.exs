@@ -21,12 +21,12 @@ defmodule DynamoTest do
   end
 
   # This function will generate a Dynamo configuration list given N
-  @spec getConfigList(list({atom(), non_neg_integer()}), pos_integer(), pos_integer(), pos_integer(), pos_integer(), pos_integer()) :: list(%Dynamo{})
-  def getConfigList(view, n, heartbeat_timeout, checkout_timeout, write_res, read_res) do
+  @spec getConfigList(list({atom(), non_neg_integer()}), atom(),pos_integer(), pos_integer(), pos_integer(), pos_integer(), pos_integer()) :: list(%Dynamo{})
+  def getConfigList(view, dispatcher, n, heartbeat_timeout, checkout_timeout, write_res, read_res) do
     view
     |> Enum.with_index
     |> Enum.map(fn({{x,index}, i})->
-      Dynamo.new(index, getPreferenceList(view, n, i), view, heartbeat_timeout, checkout_timeout, write_res, read_res)
+      Dynamo.new(index, dispatcher, getPreferenceList(view, n, i), view, heartbeat_timeout, checkout_timeout, write_res, read_res)
     end)
   end
 
@@ -64,7 +64,10 @@ defmodule DynamoTest do
     Emulation.init()
     Emulation.append_fuzzers([Fuzzers.delay(2)])
     view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
-    config_list=getConfigList(view, 3, 50, 5000, 1, 1)
+    write_res=2
+    read_res=2
+    dispatcher_name=:dispatcher
+    config_list=getConfigList(view,dispatcher_name, 3, 50, 5000, write_res, read_res)
     config_list
     |> Enum.with_index
     |> Enum.each(fn ({config,i}) ->
@@ -73,7 +76,7 @@ defmodule DynamoTest do
       spawn(node, fn -> Dynamo.dynamo(config,[]) end)
     end)
     dispatcher = Dynamo.Dispatcher.new(view)
-    spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+    spawn(dispatcher_name, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
     client = Dynamo.Client.new(500,:dispatcher)
     client_thread=
       spawn(:client, fn ->
@@ -81,9 +84,10 @@ defmodule DynamoTest do
     IO.inspect(tmp)
     receive do
     after
-      500 -> assert true
+      50 -> assert true
     end
     result= Dynamo.Client.get(client, 0)
+    IO.inspect(result)
     # assert result ==5
     end)
     handle = Process.monitor(client_thread)
@@ -91,7 +95,7 @@ defmodule DynamoTest do
     receive do
       {:DOWN, ^handle, _, _, _} -> true
     after
-      5_000 -> assert false
+      1000 -> assert true
     end
   after
     Emulation.terminate()
