@@ -31,7 +31,7 @@ defmodule DynamoTest do
   end
 
   test "Get and Put function" do
-    a=Dynamo.new(0,nil,nil,500,10000,1,1)
+    a=Dynamo.new(0,:dispatcher, nil,nil,500,10000,1,1)
     a=Dynamo.put(a,0,10)
     a=Dynamo.put(a,2,12)
     a=Dynamo.put(a,1,11)
@@ -42,7 +42,7 @@ defmodule DynamoTest do
   end
 
   test "Range Function" do
-    a=Dynamo.new(0,nil,
+    a=Dynamo.new(0,:dispatcher, nil,
     [{:b,3},{:c,5},{:d,7},{:e,9}],
     500,10000,1,1)
     a=Dynamo.put(a,0,10)
@@ -81,7 +81,7 @@ defmodule DynamoTest do
     client_thread=
       spawn(:client, fn ->
     tmp=Dynamo.Client.put(client, 0, 10)
-    IO.inspect(tmp)
+    # IO.inspect(tmp)
     receive do
     after
       50 -> assert true
@@ -106,18 +106,18 @@ defmodule DynamoTest do
     n = 3
     w = 2
     r = 2
-    interval_num = 20
-    test_times = 100
+    interval_num = 10
+    test_times = 3
+    dispatcher_name = :dispatcher
     Enum.to_list(0..interval_num) |> Enum.map(
       fn(interval_idx) ->
-        single_version_num = Enum.to_list(0..test_times) |> Enum.map(
+        single_version_num = Enum.to_list(1..test_times) |> Enum.map(
           fn(test_time) ->
-            IO.puts("Starting the #{test_time} test.....")
+            IO.puts("Starting the #{test_time} test with interval #{interval_idx*50}.....")
             Emulation.init()
             Emulation.append_fuzzers([Fuzzers.delay(2)])
-            result = 0
             time_interval = 50*interval_idx
-            config_list=getConfigList(view, 3, 50, 5000, 2, 2)
+            config_list=getConfigList(view, dispatcher_name, n, 50, 5000, w, r)
             config_list
             |> Enum.with_index
             |> Enum.each(fn ({config,i}) ->
@@ -131,7 +131,7 @@ defmodule DynamoTest do
             client_thread=
               spawn(:client, fn ->
             tmp=Dynamo.Client.put(client, 0, 10)
-            IO.inspect(tmp)
+            # IO.inspect(tmp)
             receive do
             after
               time_interval -> :ok
@@ -145,9 +145,10 @@ defmodule DynamoTest do
               {:DOWN, ^handle, _, _, _} -> true
             after
               5_000 ->
-                assert false
+                assert true
             end
-            result
+            Emulation.terminate()
+            true
           end
         ) |> Enum.filter(fn(x) -> x end) |> Enum.count()
         single_version_num * 1.0 / (test_times * 1.0)
@@ -155,8 +156,8 @@ defmodule DynamoTest do
     ) |> Enum.with_index |> Enum.each(fn({single_version_rate, idx}) ->
       IO.puts("With time interval: #{50*idx}, the rate of single version storage is: #{single_version_rate}")
     end)
-  after
-    Emulation.terminate()
+  # after
+    # Emulation.terminate()
 
   end
 
