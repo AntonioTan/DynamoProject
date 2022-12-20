@@ -105,7 +105,8 @@ defmodule Dynamo do
 
     %{node | hash_map: new_hash_map}
   end
-  @spec get(%Dynamo{},non_neg_integer()):: non_neg_integer() | :not_exist
+
+  @spec get(%Dynamo{}, non_neg_integer()) :: non_neg_integer() | :not_exist
   def get(
         node,
         key
@@ -237,36 +238,158 @@ defmodule Dynamo do
   # extra_state initial to []
   def dynamo(state, extra_state) do
     receive do
-      {sender,%Dynamo.PutRequest{
-        key: key,
-        value: value,
-        hash_code: hash_code,
-        vector_clock: vector_clock,
-        is_replica: is_replica
-      }}->
-        raise "Not Implemented"
-      {sender,%Dynamo.PutResponse{
-        key: key,
-        hash_code: hash_code,
-        success: success,
-        is_replica: is_replica
-      }}->
-        raise "Not Implemented"
-      {sender,%Dynamo.GetRequest{
-        key: key,
-        hash_tree: hash_tree,
-        is_replica: is_replica
-      }}->
-        raise "Not Implemented"
-      {sender,%Dynamo.GetResponse{
-        key: key,
-        value: value,
-        vector_clock: vector_clock,
-        is_same: is_same,
-        is_replica: is_replica
-      }}->
-        raise "Not Implemented"
-      #Gossip Potocol
+      {sender,
+       %Dynamo.PutRequest{
+         key: key,
+         value: value,
+         hash_code: hash_code,
+         vector_clock: vector_clock,
+         is_replica: false,
+         client: client
+       }} ->
+        state = put(state, key, Dynamo.Object.new(value, hash_code, vector_clock))
+
+        broadcast_to_pref(
+          state,
+          Dynamo.PutRequest.new(
+            key,
+            value,
+            hash_code,
+            vector_clock,
+            true,
+            client
+          )
+        )
+
+        extra_state =
+          if state.write_res == 1 do
+            send(sender, Dynamo.PutResponse.new(key, hash_code, true, false, client))
+            extra_state
+          else
+            extra_state = [{:w, client, key, 1} | extra_state]
+          end
+
+        dynamo(state, extra_state)
+
+      {sender,
+       %Dynamo.PutRequest{
+         key: key,
+         value: value,
+         hash_code: hash_code,
+         vector_clock: vector_clock,
+         is_replica: true,
+         client: client
+       }} ->
+        state = put(state, key, Dynamo.Object.new(value, hash_code, vector_clock))
+        send(sender, Dynamo.PutResponse.new(key, hash_code, true, true, client))
+        dynamo(state, extra_state)
+
+      {sender,
+       %Dynamo.PutResponse{
+         key: key,
+         hash_code: hash_code,
+         success: success,
+         is_replica: true,
+         client: client
+       }} ->
+        extra_state =
+          case Enum.at(
+                 Enum.filter(
+                   extra_state,
+                   fn {wr_tmp, client_tmp, key_tmp, _} ->
+                     wr_tmp == :w and client_tmp == client and key_tmp == key
+                   end
+                 ),
+                 0,
+                 :none
+               ) do
+            :none ->
+              extra_state
+
+            item ->
+              {_, _, _, vote_num} = item
+
+              if vote_num + 1 > state.write_res do
+                send(
+                  client,
+                  Dynamo.PutResponse.new(
+                    key,
+                    hash_code,
+                    success,
+                    false,
+                    client
+                  )
+                )
+
+                extra_state = [Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state]
+              else
+                if vote_num + 1 >= length(state.pref_list) do
+                  # Start synchronize
+                  syn_pref(state, key)
+                  extra_state = List.delete(extra_state, item)
+                else
+                  extra_state = [
+                    Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state
+                  ]
+                end
+              end
+          end
+
+      {sender,
+       %Dynamo.GetRequest{
+         key: key,
+         is_replica: false,
+         client: client
+       }} ->
+        extra_state =
+          if state.write_res == 1 do
+            %Dynamo.Object{value: value, vector_clock: vector_clock} =
+              Enum.at(state.hash_map, key, :not_exist)
+
+            send(sender, Dynamo.GetResponse.new(key, value, vector_clock, false, client))
+            extra_state
+          else
+            extra_state = [{:r, client, key, 1} | extra_state]
+          end
+
+        dynamo(state, extra_state)
+
+      {sender,
+       %Dynamo.GetRequest{
+         key: key,
+         is_replica: true,
+         client: client
+       }} ->
+        %Dynamo.Object{value: value, vector_clock: vector_clock} =
+          Enum.at(state.hash_map, key, :not_exist)
+
+        send(sender, Dynamo.GetResponse.new(key, value, vector_clock, true, client))
+        dynamo(state, extra_state)
+
+      {sender,
+       %Dynamo.GetResponse{
+         key: key,
+         value: value,
+         vector_clock: vector_clock,
+         is_replica: true,
+         client: client
+       }} ->
+        extra_state =
+          case Enum.at(
+                 Enum.filter(
+                   extra_state,
+                   fn {wr_tmp, client_tmp, key_tmp, _} ->
+                     wr_tmp == :r and client_tmp == client and key_tmp == key
+                   end
+                 ),
+                 0,
+                 :none
+               ) do
+            :none ->
+              extra_state
+
+            item ->
+              {_, _, _, vote_num} = item
 
               if vote_num + 1 > state.write_res do
                 send(

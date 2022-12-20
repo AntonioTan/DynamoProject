@@ -165,29 +165,3 @@ defmodule Dynamo.SynTransfer do
     }
   end
 end
-
-# This is the struct for heartbeat message received from other nodes and this should only be used to redirect
-defmodule Dynamo.RedirectedHeartbeatMessage do
-  alias Dynamo.RedirectedHeartbeatMessage
-  defstruct(
-    from: nil
-  )
-  def new(from) do
-    %RedirectedHeartbeatMessage {
-      from: from
-    }
-  end
-end
-
-# This is the struct used to gossip about the failure of one node
-defmodule Dynamo.NodeFailureMessage do
-  alias Dynamo.NodeFailureMessage
-  defstruct(
-    failure_node: nil
-  )
-  def new(failure_node) do
-    %NodeFailureMessage{
-      failure_node: failure_node
-    }
-  end
-end
