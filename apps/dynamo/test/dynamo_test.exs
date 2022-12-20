@@ -69,15 +69,30 @@ defmodule DynamoTest do
     |> Enum.with_index
     |> Enum.each(fn ({config,i}) ->
       {node,_} =Enum.at(view,i)
-      IO.puts("Generating node for #{node}")
+      # IO.puts("Generating node for #{node}")
       spawn(node, fn -> Dynamo.dynamo(config,[]) end)
     end)
     dispatcher = Dynamo.Dispatcher.new(view)
     spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
     client = Dynamo.Client.new(500,:dispatcher)
-    spawn(:client, fn ->
-    Dynamo.Client.put(client, 0, 10)
+    client_thread=
+      spawn(:client, fn ->
+    tmp=Dynamo.Client.put(client, 0, 10)
+    IO.inspect(tmp)
+    receive do
+    after
+      500 -> assert true
+    end
+    result= Dynamo.Client.get(client, 0)
+    # assert result ==5
     end)
+    handle = Process.monitor(client_thread)
+    # Timeout.
+    receive do
+      {:DOWN, ^handle, _, _, _} -> true
+    after
+      5_000 -> assert false
+    end
   after
     Emulation.terminate()
   end

@@ -359,7 +359,6 @@ defmodule Dynamo do
     value
   end
 
-
   @spec find_range([any()], non_neg_integer()) :: {non_neg_integer(), non_neg_integer}
   def find_range(node_map, key) do
     startIndex =
@@ -559,6 +558,7 @@ defmodule Dynamo do
                 end
               end
           end
+          dynamo(state, extra_state)
 
       {sender,
        %Dynamo.GetRequest{
@@ -566,15 +566,29 @@ defmodule Dynamo do
          is_replica: false,
          client: client
        }} ->
+        IO.inspect("Get")
+        entry=List.keyfind(state.hash_map, key, 0, :not_exist)
         extra_state =
           if state.write_res == 1 do
-            %Dynamo.Object{value: value, vector_clock: vector_clock} =
-              Enum.at(state.hash_map, key, :not_exist)
-
-            send(sender, Dynamo.GetResponse.new(key, value, vector_clock, false, client))
-            extra_state
+            if entry != :not_exist do
+              {_, %Dynamo.Object{value: value, vector_clock: vector_clock}} = entry
+              IO.inspect("P1")
+              send(sender, Dynamo.GetResponse.new(key, value, vector_clock, false, client))
+              extra_state
+            else
+              IO.inspect("P2")
+              send(sender, {client,:not_exist})
+            end
           else
-            extra_state = [{:r, client, key, 1} | extra_state]
+            IO.inspect("P3")
+            broadcast_to_pref_list(state, Dynamo.GetRequest.new(key, true, client))
+            extra_state =
+              if entry != :not_exist do
+                [{:r, client, key, 1} | extra_state]
+              else
+                [{:r, client, key, 0} | extra_state]
+              end
+            extra_state
           end
 
         dynamo(state, extra_state)
@@ -585,10 +599,11 @@ defmodule Dynamo do
          is_replica: true,
          client: client
        }} ->
-        %Dynamo.Object{value: value, vector_clock: vector_clock} =
-          Enum.at(state.hash_map, key, :not_exist)
-
-        send(sender, Dynamo.GetResponse.new(key, value, vector_clock, true, client))
+        entry=List.keyfind(state.hash_map, key, 0, :not_exist)
+        if entry != :not_exist do
+          {_, %Dynamo.Object{value: value, vector_clock: vector_clock}} = entry
+          send(sender, Dynamo.GetResponse.new(key, value, vector_clock, true, client))
+        end
         dynamo(state, extra_state)
 
       {sender,
@@ -636,8 +651,7 @@ defmodule Dynamo do
                   extra_state = List.delete(extra_state, item)
                 else
                   extra_state = [
-                    Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state
-                  ]
+                    Tuple.append(Tuple.delete_at(item, 3), vote_num + 1) | extra_state]
                 end
               end
           end
@@ -668,7 +682,6 @@ defmodule Dynamo do
           data = find_data(state.hash_map, range)
           send(sender, Dynamo.SynTransfer.new(range, data))
         end
-
         dynamo(state, extra_state)
 
       {sender,
@@ -771,7 +784,7 @@ defmodule Dynamo.Dispatcher do
       {sender, {:put, key, value}} ->
         node = find_node(state.node_map, key)
         hash_code = hash_fun(key)
-        send(node, Dynamo.PutRequest.new(key, value, hash_code, nil, false, sender))
+        send(node, Dynamo.PutRequest.new(key, value, hash_code, [], false, sender))
         dispatcher(state, extra_state)
 
       {sender,
@@ -786,7 +799,9 @@ defmodule Dynamo.Dispatcher do
         dispatcher(state, extra_state)
 
       {sender, {:get, key}} ->
+
         node = find_node(state.node_map, key)
+        IO.inspect(node)
         send(node, Dynamo.GetRequest.new(key, false, sender))
         dispatcher(state, extra_state)
 
