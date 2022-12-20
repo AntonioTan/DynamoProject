@@ -54,7 +54,7 @@ defmodule Dynamo do
       index: index,
       pref_list: pref_list,
       #
-      hash_map: nil,
+      hash_map: [],
       view: view,
       current_view: view,
       message_list: nil,
@@ -73,27 +73,37 @@ defmodule Dynamo do
         key,
         value
       ) do
-    object = List.keyfind(node.hash_map, key, 0)
+    map_term = List.keyfind(node.hash_map, key, 0 , :none)
+    object=
+      if map_term == :none do
+        :none
+      else
+        {_,tmp_obj}=map_term
+        tmp_obj
+      end
 
+    new_object =
+      if object == :none do
+        object = Dynamo.Object.new(value, key, [{node.index,1}])
+      else
+        clock_entry=List.keyfind(object.vector_clock, node.index, 0,:none)
+        new_clock=
+          if clock_entry == :none do
+            [{node.index, 1} | object.vector_clock]
+          else
+            {_, counter} = clock_entry
+            List.keyreplace(object.vector_clock, node.index, 0, {node.index, counter + 1})
+          end
+        object=%{object | value: value, vector_clock: new_clock}
+      end
     new_hash_map =
-      if object != nil do
-        new_object = %{object | value: value}
-        List.keyreplace(node.hash_map, key, 0, {key, new_object})
+      if map_term == :none do
+        List.keysort([{key,new_object} | node.hash_map], 0)
       else
-        List.keysort([{key, Dynamo.Object.new(value, key, [])} | node.hash_map], 0)
+        List.keyreplace(node.hash_map,key,0, {key,new_object})
       end
 
-    clock_entry = List.keyfind(object.vector_clock, node.index, 0)
-
-    vector_clock =
-      if clock_entry != nil do
-        {_, counter} = clock_entry
-        List.keyreplace(object.vector_clock, node.index, 0, {node.index, counter + 1})
-      else
-        [{node.index, 1} | object.vector_clock]
-      end
-
-    %{node | hash_map: new_hash_map, vector_clock: vector_clock}
+    %{node | hash_map: new_hash_map}
   end
 
   @spec get(%Dynamo{}, non_neg_integer()) :: non_neg_integer() | :not_exist
@@ -101,13 +111,19 @@ defmodule Dynamo do
         node,
         key
       ) do
-    object = List.keyfind(node.hash_map, key, 0)
-
+    map_term = List.keyfind(node.hash_map, key, 0 ,:none)
+    object=
+      if map_term == :none do
+        :none
+      else
+        {_,tmp_object}=map_term
+        tmp_object
+      end
     value =
-      if object != nil do
+      if object == :none do
         :not_exist
       else
-        node.value
+        object.value
       end
 
     value
@@ -124,53 +140,61 @@ defmodule Dynamo do
     startIndex =
       case List.last(Enum.filter(node_map, fn {_, index} -> index < key end), :none) do
         :none ->
-          elem(List.last(node_map), 0)
-
-        {node, _} ->
-          node
+          :none
+        {_, index} ->
+          index
       end
 
     endIndex =
       case List.first(Enum.filter(node_map, fn {_, index} -> index >= key end), :none) do
         :none ->
-          elem(node_map[0], 0)
-
-        {node, _} ->
-          node
+          :none
+        {_, index} ->
+          index
       end
+    if startIndex == :none or endIndex == :none do
+      {_,e}=List.first(node_map)
+      {_,s}=List.last(node_map)
+      {s,e}
+    else
+      {startIndex, endIndex}
+    end
 
-    {startIndex, endIndex}
   end
 
   @spec find_data([any()], {non_neg_integer(), non_neg_integer()}) :: [any()]
-  def find_data(node_map, range) do
+  def find_data(hash_map, range) do
     {startIndex, endIndex} = range
 
     return_list =
       if endIndex < startIndex do
-        first_list = Enum.filter(node_map, fn {_, index} -> index > startIndex end)
-        second_list = Enum.filter(node_map, fn {_, index} -> index <= endIndex end)
+        first_list = Enum.filter(hash_map, fn {index, _} -> index > startIndex end)
+        second_list = Enum.filter(hash_map, fn {index, _} -> index <= endIndex end)
         first_list ++ second_list
       else
-        list = Enum.filter(node_map, fn {_, index} -> (index > startIndex) and (index <= endIndex) end)
+        list =
+          Enum.filter(hash_map, fn {index, _} -> index > startIndex and index <= endIndex end)
         list
       end
 
     return_list
   end
-  @spec update_data([any()], {non_neg_integer(), non_neg_integer()},[any()]) :: [any()]
-  def update_data(node_map, range, data) do
+
+  @spec update_data([any()], {non_neg_integer(), non_neg_integer()}, [any()]) :: [any()]
+  def update_data(hash_map, range, data) do
     {startIndex, endIndex} = range
 
     return_list =
       if endIndex < startIndex do
-        mid_list = Enum.filter(node_map, fn {_, index} -> (index > endIndex) and (index <= startIndex) end)
-        first_list = Enum.filter(data, fn {_, index} -> index > startIndex end)
-        second_list = Enum.filter(data, fn {_, index} -> index <= endIndex end)
+        mid_list =
+          Enum.filter(hash_map, fn {index,_} -> index > endIndex and index <= startIndex end)
+
+        first_list = Enum.filter(data, fn {index,_} -> index > startIndex end)
+        second_list = Enum.filter(data, fn {index,_} -> index <= endIndex end)
         first_list ++ mid_list ++ second_list
       else
-        first_list = Enum.filter(node_map, fn {_, index} -> (index <= startIndex)  end)
-        second_list = Enum.filter(node_map, fn {_, index} -> (index > endIndex)  end)
+        first_list = Enum.filter(hash_map, fn {index,_} -> index <= startIndex end)
+        second_list = Enum.filter(hash_map, fn {index,_} -> index > endIndex end)
         first_list ++ data ++ second_list
       end
 
@@ -289,11 +313,11 @@ defmodule Dynamo do
                 send(
                   client,
                   Dynamo.PutResponse.new(
-                    key: key,
-                    hash_code: hash_code,
-                    success: success,
-                    is_replica: false,
-                    client: client
+                    key,
+                    hash_code,
+                    success,
+                    false,
+                    client
                   )
                 )
 
@@ -371,11 +395,11 @@ defmodule Dynamo do
                 send(
                   client,
                   Dynamo.GetResponse.new(
-                    key: key,
-                    value: value,
-                    vector_clock: vector_clock,
-                    is_replica: false,
-                    client: client
+                    key,
+                    value,
+                    vector_clock,
+                    false,
+                    client
                   )
                 )
 
@@ -421,11 +445,13 @@ defmodule Dynamo do
         end
 
         dynamo(state, extra_state)
-      {sender, %Dynamo.SynTransfer{
-        range: range,
-        data: data
-      }} ->
-        update_data(state.hash_map,range,data)
+
+      {sender,
+       %Dynamo.SynTransfer{
+         range: range,
+         data: data
+       }} ->
+        update_data(state.hash_map, range, data)
         dynamo(state, extra_state)
         # Gossip Potocol
     end
@@ -486,7 +512,7 @@ defmodule Dynamo.Dispatcher do
 
       {sender, {:get, key}} ->
         node = find_node(state.node_map, key)
-        send(node, Dynamo.GetRequest.new(key, nil, false, sender))
+        send(node, Dynamo.GetRequest.new(key, false, sender))
         dispatcher(state, extra_state)
 
       {sender,
