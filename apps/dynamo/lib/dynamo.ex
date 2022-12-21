@@ -348,7 +348,7 @@ defmodule Dynamo do
         broadcast_to_pref_list(state, Dynamo.NodeFailureMessage.new(failed_node))
         send(state.dispatcher, Dynamo.NodeFailureMessage.new(failed_node))
         state = handle_current_view_change(state, failed_node)
-        IO.puts("Node #{whoami()} Create failure message for #{failed_node}")
+        # IO.puts("Node #{whoami()} Create failure message for #{failed_node}")
         state
       end
 
@@ -565,12 +565,12 @@ defmodule Dynamo do
               extra_state
 
             item ->
-              IO.inspect("Update extra_state #{sender}")
-              IO.inspect(extra_state)
+              # IO.inspect("Update extra_state #{sender}")
+              # IO.inspect(extra_state)
               {_, _, _,_, vote_num} = item
 
               if vote_num + 1 >= state.write_res do
-                IO.puts("Send Write feedback")
+                # IO.puts("Send Write feedback")
                 send(
                   state.dispatcher,
                   Dynamo.PutResponse.new(
@@ -607,7 +607,7 @@ defmodule Dynamo do
          is_replica: false,
          client: client
        }} ->
-        IO.inspect("Get")
+        # IO.inspect("Get")
         entry = List.keyfind(state.hash_map, key, 0, :not_exist)
 
           if state.read_res == 1 do
@@ -676,11 +676,11 @@ defmodule Dynamo do
               extra_state
 
             item ->
-              IO.inspect("Update read extra_state #{sender}")
+              # IO.inspect("Update read extra_state #{sender}")
               {wr_tmp, client_tmp, key_tmp,prev_same, vote_num} = item
 
               if vote_num + 1 >= state.read_res do
-                IO.puts("Send Read feedback")
+                # IO.puts("Send Read feedback")
                 send(
                   state.dispatcher,
                   Dynamo.GetResponse.new(
@@ -750,7 +750,7 @@ defmodule Dynamo do
 
       # Gossip Potocol
       :set_heartbeat_timeout ->
-        IO.puts("Node #{whoami()} received heartbeat_timeout")
+        # IO.puts("Node #{whoami()} received heartbeat_timeout")
         state = setup_node_with_heartbeat(state)
         dynamo(state, extra_state)
 
@@ -776,7 +776,7 @@ defmodule Dynamo do
         dynamo(state, extra_state)
 
       {sender, :get_failure_list} ->
-        IO.puts("Node #{whoami()} received get_failure_list msg")
+        # IO.puts("Node #{whoami()} received get_failure_list msg")
         send(sender, Dynamo.ClientFailureNodeListMessage.new(state.failure_node_list))
         dynamo(state, extra_state)
 
@@ -847,7 +847,7 @@ defmodule Dynamo.Dispatcher do
     receive do
       {sender, {:put, key, value}} ->
         node = find_node(state.node_map, key)
-        IO.inspect("Put #{key} on #{node}")
+        # IO.inspect("Put #{key} on #{node}")
         hash_code = hash_fun(key)
         send(node, Dynamo.PutRequest.new(key, value, hash_code, [], false, sender))
         dispatcher(state, extra_state)
@@ -865,7 +865,7 @@ defmodule Dynamo.Dispatcher do
 
       {sender, {:get, key}} ->
         node = find_node(state.node_map, key)
-        IO.inspect("Get #{key} on #{node}")
+        # IO.inspect("Get #{key} on #{node}")
         send(node, Dynamo.GetRequest.new(key, false, sender))
         dispatcher(state, extra_state)
 
@@ -877,7 +877,7 @@ defmodule Dynamo.Dispatcher do
          is_replica: is_same,
          client: client
        }} ->
-        IO.inspect("Get Response")
+        # IO.inspect("Get Response")
         send(client, {:ok, value, is_same})
         dispatcher(state, extra_state)
 

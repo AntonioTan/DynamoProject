@@ -1,6 +1,6 @@
 defmodule DynamoTest do
   use ExUnit.Case
-  import Emulation, only: [spawn: 2, send: 2]
+  import Emulation, only: [spawn: 2, send: 2, whoami: 0, mark_unfuzzable: 0]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -31,7 +31,7 @@ defmodule DynamoTest do
   end
 
   test "Get and Put function" do
-    a=Dynamo.new(0,nil,nil,500,10000,1,1)
+    a=Dynamo.new(0,:dispatcher, nil,nil,500,10000,1,1)
     a=Dynamo.put(a,0,10)
     a=Dynamo.put(a,2,12)
     a=Dynamo.put(a,1,11)
@@ -42,7 +42,7 @@ defmodule DynamoTest do
   end
 
   test "Range Function" do
-    a=Dynamo.new(0,nil,
+    a=Dynamo.new(0,:dispatcher, nil,
     [{:b,3},{:c,5},{:d,7},{:e,9}],
     500,10000,1,1)
     a=Dynamo.put(a,0,10)
@@ -81,7 +81,7 @@ defmodule DynamoTest do
     client_thread=
       spawn(:client, fn ->
     tmp=Dynamo.Client.put(client, 0, 10)
-    IO.inspect(tmp)
+    # IO.inspect(tmp)
     tmp=Dynamo.Client.put(client, 0, 11)
     receive do
     after
@@ -103,6 +103,84 @@ defmodule DynamoTest do
   end
 
   test "Data for Plots" do
+    view = [:A, :B, :C, :D, :E, :F, :G, :H, :I, :J, :K, :L] |> Enum.with_index |> Enum.map(fn({name, idx}) -> {name, idx*2} end)
+    n = 7
+    w = 1
+    r = 4
+    interval_num = 20
+    test_times = 5000
+    dispatcher_name = :dispatcher
+    constant_interval = 10
+    Enum.to_list(1..test_times) |> Enum.map(
+      fn(test_time) ->
+            whetherSame = true
+            # IO.puts("Starting the #{test_time} test.....")
+            IO.puts("Starting the test.....")
+            Emulation.init()
+            Emulation.append_fuzzers([Fuzzers.delay(10)])
+            owner = self()
+            config_list=getConfigList(view, dispatcher_name, n, 50, 5000, w, r)
+            config_list
+            |> Enum.with_index
+            |> Enum.each(fn ({config,i}) ->
+              {node,_} =Enum.at(view,i)
+              # IO.puts("Generating node for #{node}")
+              spawn(node, fn -> Dynamo.dynamo(config,[]) end)
+            end)
+            dispatcher = Dynamo.Dispatcher.new(view)
+            spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+            client = Dynamo.Client.new(500,:dispatcher)
+            client2 = Dynamo.Client.new(500,:dispatcher)
+            client_thread=
+                spawn(:client, fn ->
+                tmp=Dynamo.Client.put(client, 0, 10)
+                tmp=Dynamo.Client.put(client, 0, 11)
+                # tmp=Dynamo.Client.put(client, 0, 12)
+                # tmp=Dynamo.Client.put(client, 0, 13)
+                # tmp=Dynamo.Client.put(client, 0, 14)
+                # IO.inspect(tmp)
+                receive do
+                end
+              end)
+            client_thread2 =
+                spawn(:client2, fn ->
+                      mark_unfuzzable()
+                      Enum.to_list(1..interval_num) |> Enum.each(
+                        fn(interval_idx) ->
+                          {val, res} = Dynamo.Client.get(client2, 0)
+                          Process.sleep(constant_interval)
+                          IO.puts(val == 11 || val == :not_exist)
+                        end
+                      )
+                    end)
+            handle = Process.monitor(client_thread)
+            # Timeout.
+            receive do
+              {:DOWN, ^handle, _, _, _} -> true
+              # :heartbeat ->
+              #   IO.puts("Received heartbeat")
+            after
+              1000 ->
+                assert true
+            end
+            Emulation.terminate()
+      end
+    )
+    end
+  # after
+    # Emulation.terminate()
 
+
+
+  test "Spawn two processes with the same name" do
+    Emulation.init()
+    Emulation.append_fuzzers([Fuzzers.delay(2)])
+    view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
+    dispatcher = Dynamo.Dispatcher.new(view)
+    spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+    Emulation.init()
+    spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
+  after
+    Emulation.terminate()
   end
 end
