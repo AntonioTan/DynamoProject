@@ -464,19 +464,23 @@ defmodule Dynamo do
   def build_tree(state, range) do
     {startIndex, endIndex} = range
 
+    obj_list=
     if endIndex < startIndex do
-      list1 = Enum.filter(state.hash_map, fn {key, _} -> key > endIndex end)
-      list2 = Enum.filter(state.hash_map, fn {key, _} -> key < startIndex end)
+      list1 = Enum.filter(state.hash_map, fn {key, _} -> key <= endIndex end)
+      list2 = Enum.filter(state.hash_map, fn {key, _} -> key > startIndex end)
       obj_list = list1 ++ list2
-      mesh_list = Enum.map(obj_list, fn {key, %Dynamo.Object{value: value}} -> value end)
-      mt = MerkleTree.new(mesh_list, fn x -> x end)
     else
       obj_list =
         Enum.filter(state.hash_map, fn {key, _} -> key <= endIndex and key > startIndex end)
-
+    end
+    mt=
+    if Enum.empty?(obj_list) do
+      mt = MerkleTree.new([-1], fn x -> x end)
+    else
       mesh_list = Enum.map(obj_list, fn {key, %Dynamo.Object{value: value}} -> value end)
       mt = MerkleTree.new(mesh_list, fn x -> x end)
     end
+
   end
 
   @spec syn_pref(%Dynamo{}, non_neg_integer()) :: [boolean()]
