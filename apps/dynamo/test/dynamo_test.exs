@@ -1,6 +1,6 @@
 defmodule DynamoTest do
   use ExUnit.Case
-  import Emulation, only: [spawn: 2, send: 2]
+  import Emulation, only: [spawn: 2, send: 2, whoami: 0]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -103,21 +103,24 @@ defmodule DynamoTest do
   end
 
   test "Data for Plots" do
-    view=[{:a,3},{:b,5},{:c,7},{:d,9},{:e,11}]
-    n = 3
-    w = 2
-    r = 2
-    interval_num = 10
+    view = [:A, :B, :C, :D, :E, :F, :G, :H, :I, :J, :K, :L] |> Enum.with_index
+    n = 7
+    w = 1
+    r = 4
+    interval_num = 4
     test_times = 3
     dispatcher_name = :dispatcher
+    constant_interval = 10
     Enum.to_list(0..interval_num) |> Enum.map(
       fn(interval_idx) ->
         single_version_num = Enum.to_list(1..test_times) |> Enum.map(
           fn(test_time) ->
-            IO.puts("Starting the #{test_time} test with interval #{interval_idx*50}.....")
+            whetherSame = true
+            IO.puts("Starting the #{test_time} test with interval #{interval_idx*constant_interval}.....")
             Emulation.init()
-            Emulation.append_fuzzers([Fuzzers.delay(2)])
-            time_interval = 50*interval_idx
+            Emulation.append_fuzzers([Fuzzers.delay(10)])
+            owner = self()
+            time_interval = constant_interval*interval_idx
             config_list=getConfigList(view, dispatcher_name, n, 50, 5000, w, r)
             config_list
             |> Enum.with_index
@@ -130,32 +133,52 @@ defmodule DynamoTest do
             spawn(:dispatcher, fn -> Dynamo.Dispatcher.dispatcher(dispatcher, nil) end)
             client = Dynamo.Client.new(500,:dispatcher)
             client_thread=
-              spawn(:client, fn ->
-            tmp=Dynamo.Client.put(client, 0, 10)
-            # IO.inspect(tmp)
-            receive do
-            after
-              time_interval -> :ok
-            end
-            result = Dynamo.Client.get(client, 0)
-            # assert result ==5
-            end)
+                spawn(:client, fn ->
+                tmp=Dynamo.Client.put(client, 0, 10)
+                tmp=Dynamo.Client.put(client, 0, 11)
+                # tmp=Dynamo.Client.put(client, 0, 12)
+                # tmp=Dynamo.Client.put(client, 0, 13)
+                # tmp=Dynamo.Client.put(client, 0, 14)
+                # IO.inspect(tmp)
+                receive do
+                end
+              end)
+            Process.sleep(time_interval)
+            client2 = Dynamo.Client.new(500,:dispatcher)
+            client_thread2 =
+                spawn(:client2, fn ->
+                {val, res} = Dynamo.Client.get(client2, 0)
+                IO.puts("The value is #{res}")
+                # assert result ==5
+                send(owner, {:get_res, res})
+                receive do
+                  _ -> whetherSame = res
+                end
+              end)
+
             handle = Process.monitor(client_thread)
             # Timeout.
             receive do
               {:DOWN, ^handle, _, _, _} -> true
+              # :heartbeat ->
+              #   IO.puts("Received heartbeat")
             after
-              5_000 ->
+              2000 ->
                 assert true
             end
             Emulation.terminate()
-            true
+            whetherSame = receive do
+              {:get_res, res} ->
+                IO.puts("Received #{res}")
+                res
+            end
+            whetherSame
           end
-        ) |> Enum.filter(fn(x) -> x end) |> Enum.count()
+        ) |> Enum.filter(fn(x) -> x == true end) |> Enum.count()
         single_version_num * 1.0 / (test_times * 1.0)
       end
     ) |> Enum.with_index |> Enum.each(fn({single_version_rate, idx}) ->
-      IO.puts("With time interval: #{50*idx}, the rate of single version storage is: #{single_version_rate}")
+      IO.puts("With time interval: #{constant_interval*idx}, the rate of single version storage is: #{single_version_rate}")
     end)
   # after
     # Emulation.terminate()

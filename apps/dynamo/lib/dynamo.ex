@@ -561,8 +561,8 @@ defmodule Dynamo do
               extra_state
 
             item ->
-              IO.inspect("Update extra_state #{sender}")
-              IO.inspect(extra_state)
+              # IO.inspect("Update extra_state #{sender}")
+              # IO.inspect(extra_state)
               {_, _, _,_, vote_num} = item
 
               if vote_num + 1 >= state.write_res do
