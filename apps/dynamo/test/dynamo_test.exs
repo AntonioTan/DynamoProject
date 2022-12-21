@@ -106,9 +106,9 @@ defmodule DynamoTest do
     view = [:A, :B, :C, :D, :E, :F, :G, :H, :I, :J, :K, :L] |> Enum.with_index |> Enum.map(fn({name, idx}) -> {name, idx*2} end)
     n = 7
     w = 1
-    r = 4
+    r = 3
     interval_num = 20
-    test_times = 5000
+    test_times = 600
     dispatcher_name = :dispatcher
     constant_interval = 10
     Enum.to_list(1..test_times) |> Enum.map(
@@ -149,7 +149,8 @@ defmodule DynamoTest do
                         fn(interval_idx) ->
                           {val, res} = Dynamo.Client.get(client2, 0)
                           Process.sleep(constant_interval)
-                          IO.puts(val == 11 || val == :not_exist)
+                          IO.puts(val)
+                          # IO.puts(val == 11 || val == :not_exist)
                         end
                       )
                     end)
